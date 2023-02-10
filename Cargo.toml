@@ -8,3 +8,10 @@ edition = "2021"
 [dependencies]
 flate2 = "1.0"
 eyre = "0.6.8"
+reqwest = {version = "0.11.14", features = ["gzip", "brotli"]}
+tokio = {version = "1.25.0", features = ["full"]}
+scraper = "0.14.0"
+once_cell = "1.17.0"
+maplit = "1.0.2"
+regex = "1.7.1"
+url = "2.3.1"

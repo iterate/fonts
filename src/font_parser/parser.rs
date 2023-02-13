@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fs, str::FromStr};
 
 use eyre::{eyre, Result};
 
@@ -30,7 +30,7 @@ impl FromStr for FontSignature {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FontData {
     pub family_name: String,
     pub sub_family_name: String,
@@ -39,12 +39,13 @@ pub struct FontData {
 }
 
 impl FontData {
-    // pub fn from_filepath(filepath: &str) -> Result<FontData> {
-    //     // reads into 1-byte array
-    //     let content = fs::read(filepath)?;
+    #[cfg(test)] // only used in testing for now
+    fn from_filepath(filepath: &str) -> Result<FontData> {
+        // reads into 1-byte array
+        let content = fs::read(filepath)?;
 
-    //     return FontData::from_bytes(&content);
-    // }
+        return FontData::from_bytes(&content);
+    }
 
     pub fn from_bytes(content: &Vec<u8>) -> Result<FontData> {
         let signature: FontSignature = content.as_slice().try_into()?;
@@ -53,5 +54,40 @@ impl FontData {
             FontSignature::Woff => return parse_woff(&content),
             FontSignature::Woff2 => return Err(eyre!("woff2 parsing not implemented!")),
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use eyre::Result;
+
+    use super::FontData;
+
+    #[test]
+    fn get_font_data_from_woff() -> Result<()> {
+        let font_data = FontData::from_filepath("test_files/test_font_1.woff")?;
+
+        let expected_results = FontData {
+            family_name: "Univers Else".to_owned(),
+            sub_family_name: "Regular".to_owned(),
+            identifier: "webfont".to_owned(),
+            full_name: "Univers Else Regular".to_owned(),
+        };
+
+        assert_eq!(font_data, expected_results);
+
+        let font_data = FontData::from_filepath("test_files/test_font_2.woff")?;
+
+        let expected_results = FontData {
+            family_name: "Adieu".to_owned(),
+            sub_family_name: "Regular".to_owned(),
+            identifier: "3.100;UKWN;Adieu-Regular".to_owned(),
+            full_name: "Adieu Regular".to_owned(),
+        };
+
+        assert_eq!(font_data, expected_results);
+
+        Ok(())
     }
 }

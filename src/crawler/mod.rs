@@ -104,7 +104,7 @@ impl Crawler {
 
         // need to handle that content-encoding is not [gzip, brotli] (defined as features in reqwest)
         // might be enough to check if string text is utf-8 encodable
-        let mut s = match String::from_utf8(b.to_vec()) {
+        let s = match std::str::from_utf8(&b) {
             Ok(s) => s,
             Err(err) => {
                 return Err(eyre!(
@@ -114,7 +114,7 @@ impl Crawler {
             }
         };
 
-        Ok(parse_css_doc(&mut s)?)
+        Ok(parse_css_doc(&mut s.to_owned())?)
     }
 
     pub async fn get_font_file_as_bytes(&self, font_url: &str) -> Result<Vec<u8>> {

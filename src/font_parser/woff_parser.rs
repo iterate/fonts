@@ -229,11 +229,11 @@ fn get_name_id_from_record(
         .find(|&record| record.name_id == find_id)
         .ok_or_else(|| eyre!("Unable to find font family record"))
         .map(|record| -> Result<String> {
-            Ok(String::from_utf8(
-                data[table_offset + record.offset..table_offset + record.offset + record.length]
-                    .to_vec(),
+            Ok(std::str::from_utf8(
+                &data[table_offset + record.offset..table_offset + record.offset + record.length],
             )
             .map_err(|_| eyre!("Unable to parse bytearray as utf-8"))?
+            .trim()
             .replace("\0", ""))
         })?
 }

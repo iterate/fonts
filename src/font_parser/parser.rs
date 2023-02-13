@@ -1,11 +1,13 @@
-use std::{fs, str::FromStr};
+use std::str::FromStr;
 
 use eyre::{eyre, Result};
 
 use super::woff_parser::parse_woff;
 
+#[derive(Debug)]
 enum FontSignature {
     Woff,
+    Woff2,
 }
 
 impl TryInto<FontSignature> for &[u8] {
@@ -22,7 +24,8 @@ impl FromStr for FontSignature {
     fn from_str(s: &str) -> Result<Self> {
         match s {
             "wOFF" => Ok(FontSignature::Woff),
-            _ => Err(eyre!("Signature variant not found!")),
+            "wOF2" => Ok(FontSignature::Woff2),
+            _ => Err(eyre!("Signature variant for {} not found!", s)),
         }
     }
 }
@@ -36,14 +39,19 @@ pub struct FontData {
 }
 
 impl FontData {
-    pub fn from_filepath(filepath: &str) -> Result<FontData> {
-        // reads into 1-byte array
-        let content = fs::read(filepath)?;
+    // pub fn from_filepath(filepath: &str) -> Result<FontData> {
+    //     // reads into 1-byte array
+    //     let content = fs::read(filepath)?;
 
+    //     return FontData::from_bytes(&content);
+    // }
+
+    pub fn from_bytes(content: &Vec<u8>) -> Result<FontData> {
         let signature: FontSignature = content.as_slice().try_into()?;
 
         match signature {
             FontSignature::Woff => return parse_woff(&content),
+            FontSignature::Woff2 => return Err(eyre!("woff2 parsing not implemented!")),
         };
     }
 }

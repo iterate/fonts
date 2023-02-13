@@ -78,7 +78,7 @@ pub fn parse_woff(content: &[u8]) -> Result<FontData> {
 // 60-64    UInt32	origChecksum	Checksum of the uncompressed table.
 
 struct TableDirectoryEntry {
-    tag: String,
+    // tag: String,
     offset: usize,
     comp_length: usize,
     orig_length: usize,
@@ -100,7 +100,7 @@ impl TryFrom<Vec<u8>> for TableDirectoryEntry {
         let orig_length: u32 = u32::from_be_bytes(value[12..16].try_into()?);
 
         Ok(TableDirectoryEntry {
-            tag: tag.to_owned(),
+            // tag: tag.to_owned(),
             offset: offset as usize,
             comp_length: comp_length as usize,
             orig_length: orig_length as usize,
@@ -117,8 +117,8 @@ impl TryFrom<Vec<u8>> for TableDirectoryEntry {
 
 #[derive(Debug)]
 struct NameTable {
-    version: u16,
-    count: u16,
+    // version: u16,
+    // count: u16,
     offset: usize,
     records: Vec<NameRecord>,
     data: Vec<u8>,
@@ -134,9 +134,9 @@ struct NameTable {
 
 #[derive(Debug)]
 struct NameRecord {
-    platform_id: u16,
-    encoding_id: u16,
-    language_id: u16,
+    // platform_id: u16,
+    // encoding_id: u16,
+    // language_id: u16,
     name_id: u16,
     length: usize,
     offset: usize,
@@ -155,7 +155,7 @@ fn convert_to_name_table(data: &[u8], entry: &TableDirectoryEntry) -> Result<Nam
         name_data = data[entry.offset..entry.offset + entry.comp_length].to_owned();
     }
 
-    let version: u16 = u16::from_be_bytes(name_data[0..2].try_into().unwrap());
+    // let version: u16 = u16::from_be_bytes(name_data[0..2].try_into().unwrap());
 
     let count: u16 = u16::from_be_bytes(name_data[2..4].try_into().unwrap());
 
@@ -164,8 +164,8 @@ fn convert_to_name_table(data: &[u8], entry: &TableDirectoryEntry) -> Result<Nam
     let name_records: Vec<NameRecord> = get_name_records(&name_data, count)?;
 
     Ok(NameTable {
-        version,
-        count,
+        // version,
+        // count,
         offset: offset as usize,
         records: name_records,
         data: name_data,
@@ -177,17 +177,17 @@ fn get_name_records(data: &[u8], count: u16) -> Result<Vec<NameRecord>> {
 
     for i in 0..count {
         let index: usize = (i * 12).into();
-        let platform_id = u16::from_be_bytes(data[6 + index..8 + index].try_into()?);
-        let encoding_id = u16::from_be_bytes(data[8 + index..10 + index].try_into()?);
-        let language_id = u16::from_be_bytes(data[10 + index..12 + index].try_into()?);
+        // let platform_id = u16::from_be_bytes(data[6 + index..8 + index].try_into()?);
+        // let encoding_id = u16::from_be_bytes(data[8 + index..10 + index].try_into()?);
+        // let language_id = u16::from_be_bytes(data[10 + index..12 + index].try_into()?);
         let name_id = u16::from_be_bytes(data[12 + index..14 + index].try_into()?);
         let length = u16::from_be_bytes(data[14 + index..16 + index].try_into()?);
         let offset = u16::from_be_bytes(data[16 + index..18 + index].try_into()?);
 
         records.push(NameRecord {
-            platform_id,
-            encoding_id,
-            language_id,
+            // platform_id,
+            // encoding_id,
+            // language_id,
             name_id,
             length: length.into(),
             offset: offset.into(),
@@ -233,6 +233,7 @@ fn get_name_id_from_record(
                 data[table_offset + record.offset..table_offset + record.offset + record.length]
                     .to_vec(),
             )
-            .map_err(|_| eyre!("Unable to parse bytearray as utf-8"))?)
+            .map_err(|_| eyre!("Unable to parse bytearray as utf-8"))?
+            .replace("\0", ""))
         })?
 }

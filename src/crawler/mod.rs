@@ -53,17 +53,9 @@ impl Crawler {
         for link in links {
             match link {
                 Link::Css(link) => {
-                    let url = Url::parse(&link);
-
-                    let css_url = match url {
-                        Ok(url) => url,
-                        Err(err) => {
-                            if err == ParseError::RelativeUrlWithoutBase {
-                                Url::parse(base_url)?.join(&link)?
-                            } else {
-                                continue;
-                            }
-                        }
+                    let css_url = match get_parsed_url(&link, &base_url) {
+                        Ok(parsed_url) => parsed_url,
+                        Err(_) => continue,
                     };
 
                     let font_urls = match self.get_font_urls_from_css_url(css_url.as_str()).await {
@@ -74,40 +66,21 @@ impl Crawler {
                         }
                     };
 
-                    let font_urls = font_urls.iter().filter_map(|url| {
-                        let maybe_not_base = Url::parse(&url);
-
-                        let css_url = match maybe_not_base {
-                            Ok(url) => Some(url),
-                            Err(err) => {
-                                if err == ParseError::RelativeUrlWithoutBase {
-                                    return Url::parse(base_url)
-                                        .and_then(|base| base.join(&url))
-                                        .ok();
+                    let font_urls = font_urls.iter().filter_map(|url|
+                            // could have used .ok(), but this probably be logged?
+                                match get_parsed_url(&url, &base_url) {
+                                Ok(parsed_url) => return Some(parsed_url),
+                                Err(err) => {
+                                    eprintln!("Could not parse url: {}", err);
+                                    return None;
                                 }
-                                eprintln!(
-                                    "Unable to parse found font url correctly for {}",
-                                    css_url
-                                );
-                                return None;
-                            }
-                        };
-                        return css_url;
-                    });
+                            });
                     all_font_urls.extend(font_urls)
                 }
                 Link::Font(link) => {
-                    let url = Url::parse(&link);
-
-                    let font_url = match url {
-                        Ok(url) => url,
-                        Err(err) => {
-                            if err == ParseError::RelativeUrlWithoutBase {
-                                Url::parse(base_url)?.join(&link)?
-                            } else {
-                                continue;
-                            }
-                        }
+                    let font_url = match get_parsed_url(&link, &base_url) {
+                        Ok(parsed_url) => parsed_url,
+                        Err(_) => continue,
                     };
                     all_font_urls.push(font_url);
                 }
@@ -159,4 +132,22 @@ impl Crawler {
 
         Ok(content)
     }
+}
+
+fn get_parsed_url(url: &str, base_url: &str) -> Result<Url> {
+    let maybe_not_base = Url::parse(&url);
+
+    let parsed_url = match maybe_not_base {
+        Ok(url) => url,
+        Err(err) => {
+            if err == ParseError::RelativeUrlWithoutBase {
+                return Url::parse(base_url)
+                    .and_then(|base| base.join(&url))
+                    .map_err(|err| eyre!(err));
+            }
+            return Err(eyre!("Unable to parse font url correctly for {}", url));
+        }
+    };
+
+    Ok(parsed_url)
 }

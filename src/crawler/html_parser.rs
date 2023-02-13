@@ -17,7 +17,7 @@ pub fn parse_html_doc(text: &String) -> Vec<Link> {
 
     // Find links to follow.
     // Either links to stylesheet or links to fonts
-    // might be able to do this smarter. if one assumes that relevant information will be in head tag, i wont have to traverse the whole tree
+    // might be able to do this smarter. if one assumes that relevant information will be in head tag, i won't have to traverse the whole tree
     // so, maybe, traverse the tree, find element tag that is head, than only traverse the children
     let links: Vec<Link> = document
         .tree

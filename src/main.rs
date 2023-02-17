@@ -1,4 +1,7 @@
+use std::{fs, vec};
+
 use eyre::Result;
+use tokio::sync::mpsc;
 use url::Url;
 
 use crate::{crawler::Crawler, font_parser::FontData};
@@ -19,12 +22,61 @@ async fn main() -> Result<()> {
 
     let args: Vec<String> = std::env::args().collect();
 
-    let base_url: String = Url::parse(args.get(1).expect("Send in url"))
-        .expect("Could not parse url")
-        .as_str()
-        .to_owned();
+    let url = args.get(1);
 
-    let crawler: Crawler = Crawler::new()?;
+    if let Some(url) = url {
+        let base_url: String = Url::parse(url)
+            .expect("Could not parse url")
+            .as_str()
+            .to_owned();
+
+        let crawler: Crawler = Crawler::new()?;
+        let all_font_data = get_font_data_from_page(&crawler, &base_url).await?;
+        println!("Font data for {}", base_url);
+        println!("{:#?}", all_font_data);
+    } else {
+        let urls: Vec<String> = fs::read_to_string("test_files/test_urls.txt")
+            .and_then(|file| Ok(file.split("\n").map(|s| s.to_owned()).collect()))
+            .expect("could not load file");
+        let (tx, mut rx) = mpsc::channel::<Result<Vec<FontData>>>(3);
+
+        let mut all_font_data: Vec<FontData> = vec![];
+
+        for url in urls {
+            let task_tx = tx.clone();
+            let crawler: Crawler = Crawler::new()?;
+            let base_url = url.clone();
+
+            tokio::spawn(async move {
+                let font_data = get_font_data_from_page(&crawler, &base_url).await;
+                if let Err(_) = task_tx.send(font_data).await {
+                    return;
+                }
+            });
+        }
+
+        drop(tx); // ask someone why I have to drop sender explictly
+
+        while let Some(font_data_result) = rx.recv().await {
+            match font_data_result {
+                Ok(font_data) => {
+                    println!("Got result!");
+                    all_font_data.extend(font_data);
+                }
+                Err(err) => eprintln!("Something went wrong: {}", err),
+            }
+
+            println!("DONE")
+        }
+
+        println!("Font data for everything");
+        println!("{:#?}", all_font_data);
+    }
+
+    Ok(())
+}
+
+async fn get_font_data_from_page(crawler: &Crawler, base_url: &str) -> Result<Vec<FontData>> {
     let font_urls = crawler.get_font_urls_from_page(&base_url).await?;
 
     let mut font_contents: Vec<Vec<u8>> = vec![];
@@ -53,8 +105,5 @@ async fn main() -> Result<()> {
         })
         .collect();
 
-    println!("Font data for {}", base_url);
-    println!("{:#?}", all_font_data);
-
-    Ok(())
+    Ok(all_font_data)
 }

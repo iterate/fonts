@@ -26,7 +26,7 @@ pub fn parse_css_doc(text: &mut String) -> Result<Vec<String>> {
     let urls: Vec<String> = matches
         .iter()
         .flat_map(|s| {
-            let content = s.split(";").to_owned(); // trim any white-space and split on css delimiter
+            let content = s.split(";").to_owned(); // trims any white-space and split on css delimiter
             content
                 .filter(|s| s.contains("src"))
                 .flat_map(|s| s.split(",")) // src is required for font-face to work: https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/src

@@ -1,4 +1,4 @@
-use std::{fs, str::FromStr};
+use std::str::FromStr;
 
 use eyre::{eyre, Result};
 
@@ -42,6 +42,8 @@ impl FontData {
     #[cfg(test)] // only used in testing for now
     fn from_filepath(filepath: &str) -> Result<FontData> {
         // reads into 1-byte array
+
+        use std::fs;
         let content = fs::read(filepath)?;
 
         return FontData::from_bytes(&content);

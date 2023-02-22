@@ -1,7 +1,8 @@
 use std::{fs, vec};
 
-use eyre::Result;
-use tokio::sync::mpsc;
+use eyre::{eyre, Result};
+use flume;
+use tokio::task::JoinHandle;
 use url::Url;
 
 use crate::{crawler::Crawler, font_parser::FontData};
@@ -12,6 +13,10 @@ mod font_parser;
 // KNOWN ISSUES
 // Cant find font data for https://ense.no
 // - bleh. dynamisk lastet inn.
+// Cant find stylesheet for https//www.hjernelaering.no/
+// - but its there... this is a bug
+
+const N_WORKERS: i32 = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,52 +36,69 @@ async fn main() -> Result<()> {
             .to_owned();
 
         let crawler: Crawler = Crawler::new()?;
-        let all_font_data = get_font_data_from_page(&crawler, &base_url).await?;
+        let all_font_data = get_site_data_from_page(&crawler, &base_url).await?;
         println!("Font data for {}", base_url);
         println!("{:#?}", all_font_data);
     } else {
         let urls: Vec<String> = fs::read_to_string("test_files/test_urls.txt")
-            .and_then(|file| Ok(file.split("\n").map(|s| s.to_owned()).collect()))
+            .map_err(|err| eyre!(err))
+            .map(|file| file.split("\n").map(|s| s.to_owned()).collect())
             .expect("could not load file");
-        let (tx, mut rx) = mpsc::channel::<Result<Vec<FontData>>>(3);
 
-        let mut all_font_data: Vec<FontData> = vec![];
+        let (tx, rx) = flume::bounded::<String>(5);
+
+        let handles: Vec<JoinHandle<_>> = (0..N_WORKERS)
+            .map(|i| {
+                let worker_rx = rx.clone();
+                tokio::spawn(async move {
+                    let mut thread_site_data: Vec<SiteData> = vec![];
+                    while let Ok(url) = worker_rx.recv() {
+                        println!("Received job on task {}. Url: {}", i, url);
+                        let crawler: Crawler = Crawler::new().unwrap();
+
+                        match get_site_data_from_page(&crawler, &url).await {
+                            Ok(data) => thread_site_data.push(data),
+                            Err(err) => {
+                                eprintln!("Unable to get site data for {}. Err: {}", &url, err)
+                            }
+                        }
+                    }
+                    thread_site_data
+                })
+            })
+            .collect();
 
         for url in urls {
-            let task_tx = tx.clone();
-            let crawler: Crawler = Crawler::new()?;
-            let base_url = url.clone();
-
-            tokio::spawn(async move {
-                let font_data = get_font_data_from_page(&crawler, &base_url).await;
-                if let Err(_) = task_tx.send(font_data).await {
-                    return;
-                }
-            });
+            if let Err(_) = tx.send(url) {
+                println!("Could not send to channel");
+            }
         }
 
-        drop(tx); // ask someone why I have to drop sender explictly
+        drop(tx);
 
-        while let Some(font_data_result) = rx.recv().await {
-            match font_data_result {
-                Ok(font_data) => {
-                    println!("Got result!");
-                    all_font_data.extend(font_data);
-                }
-                Err(err) => eprintln!("Something went wrong: {}", err),
-            }
+        let mut all_site_data: Vec<SiteData> = vec![];
+        for h in handles {
+            let r = h.await?;
+            println!("heihei ferdig: {:?}", r.len());
 
-            println!("DONE")
+            all_site_data.extend(r);
         }
 
         println!("Font data for everything");
-        println!("{:#?}", all_font_data);
+        println!("Length: {}", all_site_data.len());
+        println!("{:#?}", all_site_data);
     }
 
     Ok(())
 }
 
-async fn get_font_data_from_page(crawler: &Crawler, base_url: &str) -> Result<Vec<FontData>> {
+#[derive(Debug)]
+struct SiteData {
+    url: String,
+    fonts: Vec<FontData>,
+}
+
+async fn get_site_data_from_page(crawler: &Crawler, base_url: &str) -> Result<SiteData> {
     let font_urls = crawler.get_font_urls_from_page(&base_url).await?;
 
     let mut font_contents: Vec<Vec<u8>> = vec![];
@@ -98,12 +120,15 @@ async fn get_font_data_from_page(crawler: &Crawler, base_url: &str) -> Result<Ve
         .iter()
         .filter_map(|font_content| match FontData::from_bytes(font_content) {
             Ok(font_content) => Some(font_content),
-            Err(err) => {
-                eprintln!("{}", err);
+            Err(_) => {
+                //eprintln!("{}", err);
                 None
             }
         })
         .collect();
 
-    Ok(all_font_data)
+    Ok(SiteData {
+        url: base_url.to_owned(),
+        fonts: all_font_data,
+    })
 }

@@ -8,7 +8,7 @@ use url::{ParseError, Url};
 use crate::{
     crawler::{
         css_parser::parse_css_doc,
-        html_parser::{parse_html_doc, Link},
+        html_parser::{parse_html_doc, Element},
     },
     CustomError,
 };
@@ -27,7 +27,7 @@ impl HttpCrawler {
         Ok(HttpCrawler { http_client })
     }
 
-    async fn scrape_page(&self, base_url: &str) -> crate::Result<Vec<Link>> {
+    async fn scrape_page(&self, base_url: &str) -> crate::Result<Vec<Element>> {
         println!("Scraping: {}", base_url);
 
         let res = self
@@ -39,7 +39,7 @@ impl HttpCrawler {
             .text()
             .await?;
 
-        let links: Vec<Link> = parse_html_doc(&res);
+        let links: Vec<Element> = parse_html_doc(&res);
 
         if links.is_empty() {
             return Err(CustomError::NoLinksFound(base_url.to_owned()));
@@ -50,14 +50,14 @@ impl HttpCrawler {
 
     pub async fn get_font_urls_from_page(&self, base_url: &str) -> Result<Vec<Url>> {
         // Get links to follow
-        let links: Vec<Link> = self.scrape_page(base_url).await?;
+        let links: Vec<Element> = self.scrape_page(base_url).await?;
 
         // want to end up with urls that are possible to visit after this map
         let mut all_font_urls: Vec<Url> = vec![];
 
         for link in links {
             match link {
-                Link::Css(link) => {
+                Element::CssLink(link) => {
                     let css_url = match get_parsed_url(&link, &base_url) {
                         Ok(parsed_url) => parsed_url,
                         Err(_) => continue,
@@ -82,13 +82,14 @@ impl HttpCrawler {
                             });
                     all_font_urls.extend(font_urls)
                 }
-                Link::Font(link) => {
+                Element::FontLink(link) => {
                     let font_url = match get_parsed_url(&link, &base_url) {
                         Ok(parsed_url) => parsed_url,
                         Err(_) => continue,
                     };
                     all_font_urls.push(font_url);
                 }
+                _ => {}
             }
         }
 

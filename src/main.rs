@@ -1,22 +1,38 @@
-use std::{fs, vec};
+use std::{fs, time::Duration, vec};
 
-use eyre::{eyre, Result};
+use eyre::eyre;
 use flume;
 use tokio::task::JoinHandle;
 use url::Url;
 
-use crate::{crawler::Crawler, font_parser::FontData};
+use crate::{crawler::http_crawler::HttpCrawler, font_parser::FontData};
 
 mod crawler;
 mod font_parser;
+use thiserror::Error;
 
 // KNOWN ISSUES
 // Cant find font data for https://ense.no
 // - bleh. dynamisk lastet inn.
+// - https://kerkour.com/rust-crawler-javascript-single-page-application-headless-browser
+// - https://github.com/skerkour/black-hat-rust/blob/main/ch_05/crawler/src/spiders/quotes.rs#L51
+// - https://webant.online/tutorials/web-scraping-rust-fantoccini/
 // Cant find stylesheet for https//www.hjernelaering.no/
 // - but its there... this is a bug
 
-const N_WORKERS: i32 = 5;
+const HTTP_N_WORKERS: i32 = 5;
+
+pub type Result<T, E = CustomError> = std::result::Result<T, E>;
+
+#[derive(Error, Debug)]
+pub enum CustomError {
+    #[error("No links found: {0}")]
+    NoLinksFound(String),
+    #[error("Reqwest error: {0}")]
+    ReqwestError(#[from] reqwest::Error),
+    #[error("Eyre report: {0}")]
+    GenericError(#[from] eyre::Report),
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -35,8 +51,20 @@ async fn main() -> Result<()> {
             .as_str()
             .to_owned();
 
-        let crawler: Crawler = Crawler::new()?;
-        let all_font_data = get_site_data_from_page(&crawler, &base_url).await?;
+        let crawler: HttpCrawler = HttpCrawler::new()?;
+        let all_font_data = match get_site_data_from_page(&crawler, &base_url).await {
+            Ok(data) => data,
+            Err(err) => match err {
+                CustomError::NoLinksFound(_) => {
+                    println!("hallo");
+                    return Ok(());
+                }
+                _ => {
+                    eprintln!("Unable to get site data for {}. Err: {}", &url, err);
+                    return Err(err);
+                }
+            },
+        };
         println!("Font data for {}", base_url);
         println!("{:#?}", all_font_data);
     } else {
@@ -45,22 +73,60 @@ async fn main() -> Result<()> {
             .map(|file| file.split("\n").map(|s| s.to_owned()).collect())
             .expect("could not load file");
 
-        let (tx, rx) = flume::bounded::<String>(5);
+        let (html_crawler_tx, html_crawler_rx) = flume::bounded::<String>(5);
 
-        let handles: Vec<JoinHandle<_>> = (0..N_WORKERS)
+        let (browser_crawler_tx, browser_crawler_rx) = flume::bounded::<String>(2);
+
+        let browser_crawler_handles: Vec<JoinHandle<_>> = (0..1)
             .map(|i| {
-                let worker_rx = rx.clone();
+                let worker_rx = browser_crawler_rx.clone();
+                tokio::spawn(async move {
+                    let mut thread_site_data: Vec<SiteData> = vec![];
+                    while let Ok(url) = worker_rx.recv() {
+                        println!("Received BROWSER JOB on task {}. Url: {}", i, url);
+
+                        // tokio::time::sleep(Duration::from_secs(5)).await;
+
+                        // match get_site_data_from_page(&crawler, &url).await {
+                        //     Ok(data) => thread_site_data.push(data),
+                        //     Err(err) => match err {
+                        //         CustomError::NoLinksFound(url) => {
+                        //             eprintln!("Could not send to browser crawler")
+                        //         }
+                        //         _ => {
+                        //             eprintln!("Unable to get site data for {}. Err: {}", &url, err)
+                        //         }
+                        //     },
+                        // }
+                    }
+                    thread_site_data
+                })
+            })
+            .collect();
+
+        let html_crawler_handles: Vec<JoinHandle<_>> = (0..HTTP_N_WORKERS)
+            .map(|i| {
+                let worker_rx = html_crawler_rx.clone();
+                // let worker_browser_tx = browser_crawler_tx.clone();
                 tokio::spawn(async move {
                     let mut thread_site_data: Vec<SiteData> = vec![];
                     while let Ok(url) = worker_rx.recv() {
                         println!("Received job on task {}. Url: {}", i, url);
-                        let crawler: Crawler = Crawler::new().unwrap();
+                        let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+                        // if let Err(_) = worker_browser_tx.send(url.clone()) {
+                        //     eprintln!("Could not send to browser crawler")
+                        // }
 
                         match get_site_data_from_page(&crawler, &url).await {
                             Ok(data) => thread_site_data.push(data),
-                            Err(err) => {
-                                eprintln!("Unable to get site data for {}. Err: {}", &url, err)
-                            }
+                            Err(err) => match err {
+                                CustomError::NoLinksFound(_) => {
+                                    println!("SENDER TIL BROWSER");
+                                }
+                                _ => {
+                                    eprintln!("Unable to get site data for {}. Err: {}", &url, err)
+                                }
+                            },
                         }
                     }
                     thread_site_data
@@ -69,19 +135,26 @@ async fn main() -> Result<()> {
             .collect();
 
         for url in urls {
-            if let Err(_) = tx.send(url) {
+            if let Err(_) = html_crawler_tx.send(url) {
                 println!("Could not send to channel");
             }
         }
 
-        drop(tx);
+        // drop the transmitter to close the channel
+        drop(html_crawler_tx);
+        drop(browser_crawler_tx);
 
         let mut all_site_data: Vec<SiteData> = vec![];
-        for h in handles {
-            let r = h.await?;
+        for h in html_crawler_handles {
+            let r = h.await.map_err(|err| eyre!(err))?;
             println!("heihei ferdig: {:?}", r.len());
 
             all_site_data.extend(r);
+        }
+
+        for h in browser_crawler_handles {
+            let r = h.await.map_err(|err| eyre!(err))?;
+            println!("BROWSER FERDIG: {:?}", r.len());
         }
 
         println!("Font data for everything");
@@ -98,7 +171,7 @@ struct SiteData {
     fonts: Vec<FontData>,
 }
 
-async fn get_site_data_from_page(crawler: &Crawler, base_url: &str) -> Result<SiteData> {
+async fn get_site_data_from_page(crawler: &HttpCrawler, base_url: &str) -> Result<SiteData> {
     let font_urls = crawler.get_font_urls_from_page(&base_url).await?;
 
     let mut font_contents: Vec<Vec<u8>> = vec![];

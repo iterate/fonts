@@ -14,7 +14,7 @@ pub enum Element {
     CssDoc(String),
 }
 
-pub fn parse_html_doc(text: &String) -> Vec<Element> {
+pub fn get_elements_from_page(text: &String) -> Vec<Element> {
     let document = Html::parse_document(&text);
 
     // Find links to follow.
@@ -84,14 +84,14 @@ mod tests {
 
     use eyre::Result;
 
-    use crate::crawler::html_parser::{parse_html_doc, Element};
+    use crate::crawler::html_parser::{get_elements_from_page, Element};
 
     #[test]
     fn get_links_from_html() -> Result<()> {
         let html_file =
             fs::read_to_string("test_files/test_iterateno.html").expect("Could not load html file");
 
-        let links = parse_html_doc(&html_file);
+        let links = get_elements_from_page(&html_file);
         let expected_results = vec![Element::CssLink("https://uploads-ssl.webflow.com/5ea18b09bf3bfd55814199f9/css/iterate-104ab8-23d141065ef1b8634c6a653a.webflow.f3ca629db.css".to_owned())];
 
         assert_eq!(links, expected_results);
@@ -99,7 +99,7 @@ mod tests {
         let html_file =
             fs::read_to_string("test_files/test_nrkno.html").expect("Could not load html file");
 
-        let links = parse_html_doc(&html_file);
+        let links = get_elements_from_page(&html_file);
         let expected_results = vec![Element::FontLink("https://static.nrk.no/nrk-sans/1.2.1/NRKSans_Variable.woff2".to_owned()), 
                                     Element::CssLink("https://static.nrk.no/publisering/kurator-visning/assets/index-4167d179.css".to_owned()), 
                                     Element::CssLink("https://static.nrk.no/dh/module/nrkno-eksperimenter/assets/front-module.5c672c95.css".to_owned()), 

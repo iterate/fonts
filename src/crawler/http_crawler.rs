@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use async_trait::async_trait;
 use eyre::{eyre, Result};
 
 use reqwest::{header::ACCEPT, Client};
@@ -8,13 +9,29 @@ use url::{ParseError, Url};
 use crate::{
     crawler::{
         css_parser::parse_css_doc,
-        html_parser::{parse_html_doc, Element},
+        html_parser::{get_elements_from_page, Element},
     },
     CustomError,
 };
 
+use super::PageFetcher;
+
 pub struct HttpCrawler {
     http_client: Client,
+}
+
+#[async_trait]
+impl PageFetcher for HttpCrawler {
+    async fn get_page_content(&self, base_url: &str) -> Result<String> {
+        self.http_client
+            .get(base_url)
+            .header(ACCEPT, "text/html")
+            .send()
+            .await?
+            .text()
+            .await
+            .map_err(|err| eyre!(err))
+    }
 }
 
 impl HttpCrawler {
@@ -27,38 +44,22 @@ impl HttpCrawler {
         Ok(HttpCrawler { http_client })
     }
 
-    async fn scrape_page(&self, base_url: &str) -> crate::Result<Vec<Element>> {
-        println!("Scraping: {}", base_url);
+    pub async fn get_font_urls_from_page(&self, base_url: &str) -> crate::Result<Vec<Url>> {
+        // Get links to follow
+        let page_content = self.get_page_content(base_url).await?;
+        let elements: Vec<Element> = get_elements_from_page(&page_content);
 
-        let res = self
-            .http_client
-            .get(base_url)
-            .header(ACCEPT, "text/html")
-            .send()
-            .await?
-            .text()
-            .await?;
-
-        let links: Vec<Element> = parse_html_doc(&res);
-
-        if links.is_empty() {
+        if elements.is_empty() {
             return Err(CustomError::NoLinksFound(base_url.to_owned()));
         }
-
-        Ok(links)
-    }
-
-    pub async fn get_font_urls_from_page(&self, base_url: &str) -> Result<Vec<Url>> {
-        // Get links to follow
-        let links: Vec<Element> = self.scrape_page(base_url).await?;
 
         // want to end up with urls that are possible to visit after this map
         let mut all_font_urls: Vec<Url> = vec![];
 
-        for link in links {
-            match link {
-                Element::CssLink(link) => {
-                    let css_url = match get_parsed_url(&link, &base_url) {
+        for element in elements {
+            match element {
+                Element::CssLink(element) => {
+                    let css_url = match get_parsed_url(&element, &base_url) {
                         Ok(parsed_url) => parsed_url,
                         Err(_) => continue,
                     };
@@ -82,8 +83,8 @@ impl HttpCrawler {
                             });
                     all_font_urls.extend(font_urls)
                 }
-                Element::FontLink(link) => {
-                    let font_url = match get_parsed_url(&link, &base_url) {
+                Element::FontLink(element) => {
+                    let font_url = match get_parsed_url(&element, &base_url) {
                         Ok(parsed_url) => parsed_url,
                         Err(_) => continue,
                     };

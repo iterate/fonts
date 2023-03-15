@@ -19,3 +19,7 @@ flume = "0.10.14"
 thiserror = "1.0.38"
 headless_chrome = "1.0.5"
 async-trait = "0.1.66"
+
+# Used to ignore tests that touch the network
+[features]
+network = []

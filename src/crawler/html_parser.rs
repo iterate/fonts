@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use maplit::hashset;
 use once_cell::sync::Lazy;
-use scraper::Html;
+use scraper::{Html, Selector};
 
 static INCLUDE_ELEMENTS: Lazy<HashSet<&str>> = Lazy::new(|| hashset!["script", "style", "link"]);
 
@@ -27,14 +27,21 @@ pub fn get_elements_from_page(text: &String) -> Vec<Element> {
 
     // println!("{:#?}", head);
 
-    let links: Vec<Element> = document
+    let text_css_selector = Selector::parse("style").expect("could not parse selector");
+
+    // content is css, so this should be correct
+    let text_css: Vec<Element> = document
+        .select(&text_css_selector)
+        .into_iter()
+        .map(|element| Element::CssDoc(element.inner_html()))
+        .collect();
+
+    let elements: Vec<Element> = document
         .tree
         .nodes()
         .filter_map(|node| match node.value() {
             scraper::Node::Element(element) => {
                 let tag_name = element.name();
-
-                // println!("{:?}", element.name());
 
                 if INCLUDE_ELEMENTS.contains(tag_name) {
                     let mut attrs = element.attrs();
@@ -49,14 +56,6 @@ pub fn get_elements_from_page(text: &String) -> Vec<Element> {
                                 }
                             }
                             ("type", value) => {
-                                if value.contains("css") {
-                                    let href = element.attr("href");
-                                    // println!("{:?}", element);
-
-                                    if let Some(href) = href {
-                                        return Some(Element::CssLink(href.to_owned()));
-                                    }
-                                }
                                 if value.starts_with("font") {
                                     let href = element.attr("href");
                                     if let Some(href) = href {
@@ -74,7 +73,8 @@ pub fn get_elements_from_page(text: &String) -> Vec<Element> {
         })
         .collect();
 
-    links
+    // Extend elements with text_css elements
+    elements
 }
 
 #[cfg(test)]

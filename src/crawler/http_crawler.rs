@@ -110,7 +110,7 @@ impl HttpCrawler {
         let b = res.bytes().await?;
 
         // need to handle that content-encoding is not [gzip, brotli] (defined as features in reqwest)
-        // might be enough to check if string text is utf-8 encodable
+        // should be enough to check if string text is utf-8 encodable
         let s = match std::str::from_utf8(&b) {
             Ok(s) => s,
             Err(err) => {

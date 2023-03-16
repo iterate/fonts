@@ -7,10 +7,10 @@ use regex::Regex;
 // static FONT_FACE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"@font-face \{.*\}").unwrap());
 static FONT_FACE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"@font-face\{(?P<data>[\s\S]*?)\}").unwrap());
-static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"url\((?P<data>[\S]*?)\)").unwrap());
+static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\((?P<data>[\S]*?)\)").unwrap());
 
 pub fn parse_css_doc(text: &mut String) -> Result<Vec<String>> {
-    // can use retain since variable s is mutable
+    // can use retain since variable s is mutable. just want to remove whitespace
     text.retain(|c| !c.is_whitespace());
 
     let matches: Vec<&str> = FONT_FACE_RE
@@ -23,15 +23,11 @@ pub fn parse_css_doc(text: &mut String) -> Result<Vec<String>> {
         return Err(eyre!("Could not find font-face attribute"));
     }
 
+    // At this point, content has been extracted from @font-face{}
     let urls: Vec<String> = matches
         .iter()
-        .flat_map(|s| {
-            let content = s.split(";").to_owned(); // trims any white-space and split on css delimiter
-            content
-                .filter(|s| s.contains("src"))
-                .flat_map(|s| s.split(",")) // src is required for font-face to work: https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/src
-        })
-        .filter_map(|url: &str| -> Option<String> {
+        .flat_map(|s| s.split("url"))
+        .filter_map(|url| -> Option<String> {
             URL_RE
                 .captures(url.trim())
                 .and_then(|cap| cap.name("data"))

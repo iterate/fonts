@@ -26,8 +26,8 @@ pub type Result<T, E = CustomError> = std::result::Result<T, E>;
 
 #[derive(Error, Debug)]
 pub enum CustomError {
-    #[error("No links found: {0}")]
-    NoLinksFound(String),
+    #[error("No elements found: {0}")]
+    NoElementsFound(String),
     #[error("Reqwest error: {0}")]
     ReqwestError(#[from] reqwest::Error),
     #[error("Eyre report: {0}")]
@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
         let all_font_data = match get_site_data_from_page(&crawler, &base_url).await {
             Ok(data) => data,
             Err(err) => match err {
-                CustomError::NoLinksFound(_) => {
+                CustomError::NoElementsFound(_) => {
                     println!("hallo");
                     return Ok(());
                 }
@@ -120,7 +120,7 @@ async fn main() -> Result<()> {
                         match get_site_data_from_page(&crawler, &url).await {
                             Ok(data) => thread_site_data.push(data),
                             Err(err) => match err {
-                                CustomError::NoLinksFound(_) => {
+                                CustomError::NoElementsFound(_) => {
                                     println!("SENDER TIL BROWSER");
                                 }
                                 _ => {

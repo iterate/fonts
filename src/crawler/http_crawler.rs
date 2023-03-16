@@ -50,7 +50,7 @@ impl HttpCrawler {
         let elements: Vec<Element> = get_elements_from_page(&page_content);
 
         if elements.is_empty() {
-            return Err(CustomError::NoLinksFound(base_url.to_owned()));
+            return Err(CustomError::NoElementsFound(base_url.to_owned()));
         }
 
         // want to end up with urls that are possible to visit after this map

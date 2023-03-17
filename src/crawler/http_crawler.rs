@@ -86,6 +86,10 @@ impl HttpCrawler {
             }
         }
 
+        if all_font_urls.is_empty() {
+            return Err(CustomError::NoFontUrlsFound(page.base_url.to_owned()));
+        }
+
         Ok(all_font_urls)
     }
 

@@ -1,4 +1,4 @@
-use std::{fs, time::Duration, vec};
+use std::{fs, vec};
 
 use eyre::eyre;
 use flume;
@@ -28,6 +28,8 @@ pub type Result<T, E = CustomError> = std::result::Result<T, E>;
 pub enum CustomError {
     #[error("No elements found: {0}")]
     NoElementsFound(String),
+    #[error("No font urls found: {0}")]
+    NoFontUrlsFound(String),
     #[error("Reqwest error: {0}")]
     ReqwestError(#[from] reqwest::Error),
     #[error("Eyre report: {0}")]

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use async_trait::async_trait;
 use eyre::{eyre, Result};
 
 use reqwest::{header::ACCEPT, Client};
@@ -11,27 +10,11 @@ use crate::{
         css_parser::parse_css_doc,
         html_parser::{get_elements_from_page, Element},
     },
-    CustomError,
+    CustomError, Page,
 };
-
-use super::PageFetcher;
 
 pub struct HttpCrawler {
     http_client: Client,
-}
-
-#[async_trait]
-impl PageFetcher for HttpCrawler {
-    async fn get_page_content(&self, base_url: &str) -> Result<String> {
-        self.http_client
-            .get(base_url)
-            .header(ACCEPT, "text/html")
-            .send()
-            .await?
-            .text()
-            .await
-            .map_err(|err| eyre!(err))
-    }
 }
 
 impl HttpCrawler {
@@ -44,13 +27,22 @@ impl HttpCrawler {
         Ok(HttpCrawler { http_client })
     }
 
-    pub async fn get_font_urls_from_page(&self, base_url: &str) -> crate::Result<Vec<Url>> {
-        // Get links to follow
-        let page_content = self.get_page_content(base_url).await?;
-        let elements: Vec<Element> = get_elements_from_page(&page_content);
+    pub async fn get_page_content(&self, base_url: &str) -> Result<String> {
+        self.http_client
+            .get(base_url)
+            .header(ACCEPT, "text/html")
+            .send()
+            .await?
+            .text()
+            .await
+            .map_err(|err| eyre!(err))
+    }
+
+    pub async fn get_font_urls_from_page(&self, page: &Page) -> crate::Result<Vec<Url>> {
+        let elements: Vec<Element> = get_elements_from_page(&page.page_content);
 
         if elements.is_empty() {
-            return Err(CustomError::NoElementsFound(base_url.to_owned()));
+            return Err(CustomError::NoElementsFound(page.base_url.to_owned()));
         }
 
         // want to end up with urls that are possible to visit after this map
@@ -59,7 +51,7 @@ impl HttpCrawler {
         for element in elements {
             match element {
                 Element::CssLink(element) => {
-                    let css_url = match get_parsed_url(&element, &base_url) {
+                    let css_url = match get_parsed_url(&element, &page.base_url) {
                         Ok(parsed_url) => parsed_url,
                         Err(_) => continue,
                     };
@@ -74,7 +66,7 @@ impl HttpCrawler {
 
                     let font_urls = font_urls.iter().filter_map(|url|
                             // could have used .ok(), but this probably be logged?
-                                match get_parsed_url(&url, &base_url) {
+                                match get_parsed_url(&url, &page.base_url) {
                                 Ok(parsed_url) => return Some(parsed_url),
                                 Err(err) => {
                                     eprintln!("Could not parse url: {}", err);
@@ -84,7 +76,7 @@ impl HttpCrawler {
                     all_font_urls.extend(font_urls)
                 }
                 Element::FontLink(element) => {
-                    let font_url = match get_parsed_url(&element, &base_url) {
+                    let font_url = match get_parsed_url(&element, &page.base_url) {
                         Ok(parsed_url) => parsed_url,
                         Err(_) => continue,
                     };

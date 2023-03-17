@@ -52,7 +52,20 @@ async fn main() -> Result<()> {
             .to_owned();
 
         let crawler: HttpCrawler = HttpCrawler::new()?;
-        let all_font_data = match get_site_data_from_page(&crawler, &base_url).await {
+
+        let content = match crawler.get_page_content(&url).await {
+            Ok(content) => content,
+            Err(err) => {
+                panic!("Unable to get page content for {}. Err: {}", &url, err)
+            }
+        };
+
+        let page = Page {
+            base_url: url.to_owned(),
+            page_content: content,
+        };
+
+        let all_font_data = match get_site_data_from_page(&crawler, &page).await {
             Ok(data) => data,
             Err(err) => match err {
                 CustomError::NoElementsFound(_) => {
@@ -117,7 +130,20 @@ async fn main() -> Result<()> {
                         //     eprintln!("Could not send to browser crawler")
                         // }
 
-                        match get_site_data_from_page(&crawler, &url).await {
+                        let content = match crawler.get_page_content(&url).await {
+                            Ok(content) => content,
+                            Err(err) => {
+                                eprintln!("Unable to get page content for {}. Err: {}", &url, err);
+                                continue;
+                            }
+                        };
+
+                        let page = Page {
+                            base_url: url.to_owned(),
+                            page_content: content,
+                        };
+
+                        match get_site_data_from_page(&crawler, &page).await {
                             Ok(data) => thread_site_data.push(data),
                             Err(err) => match err {
                                 CustomError::NoElementsFound(_) => {
@@ -165,14 +191,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+pub struct Page {
+    base_url: String,
+    page_content: String,
+}
+
 #[derive(Debug)]
 struct SiteData {
     url: String,
     fonts: Vec<FontData>,
 }
 
-async fn get_site_data_from_page(crawler: &HttpCrawler, base_url: &str) -> Result<SiteData> {
-    let font_urls = crawler.get_font_urls_from_page(&base_url).await?;
+async fn get_site_data_from_page(crawler: &HttpCrawler, page: &Page) -> Result<SiteData> {
+    // Get page content to find links to follow
+    // let page_content = crawler.get_page_content(base_url).await?;
+    let font_urls = crawler.get_font_urls_from_page(&page).await?;
 
     let mut font_contents: Vec<Vec<u8>> = vec![];
 
@@ -201,7 +234,7 @@ async fn get_site_data_from_page(crawler: &HttpCrawler, base_url: &str) -> Resul
         .collect();
 
     Ok(SiteData {
-        url: base_url.to_owned(),
+        url: page.base_url.to_owned(),
         fonts: all_font_data,
     })
 }

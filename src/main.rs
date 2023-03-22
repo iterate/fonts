@@ -88,13 +88,45 @@ async fn main() -> Result<()> {
             .map(|file| file.split("\n").map(|s| s.to_owned()).collect())
             .expect("could not load file");
 
-        let (html_crawler_tx, html_crawler_rx) = flume::bounded::<String>(5);
+        let (page_tx, page_rx) = flume::bounded::<Page>(5);
 
-        let (browser_crawler_tx, browser_crawler_rx) = flume::bounded::<String>(2);
+        let (http_html_fetcher_tx, http_html_fetcher_rx) = flume::bounded::<String>(2);
+        let (browser_html_fetcher_tx, browser_html_fetcher_rx) = flume::bounded::<String>(2);
 
-        let browser_crawler_handles: Vec<JoinHandle<_>> = (0..1)
+        let http_fetcher_handles: Vec<JoinHandle<_>> = (0..3)
             .map(|i| {
-                let worker_rx = browser_crawler_rx.clone();
+                let rx = http_html_fetcher_rx.clone();
+                let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+                let site_data_tx = page_tx.clone();
+
+                tokio::spawn(async move {
+                    while let Ok(url) = rx.recv() {
+                        println!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
+
+                        let content = match crawler.get_page_content(&url).await {
+                            Ok(content) => content,
+                            Err(err) => {
+                                eprintln!("Unable to get page content for {}. Err: {}", &url, err);
+                                continue;
+                            }
+                        };
+
+                        let page = Page {
+                            base_url: url.to_owned(),
+                            page_content: content,
+                        };
+
+                        if let Err(_) = site_data_tx.send(page) {
+                            eprintln!("Could not send page to site data tx")
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        let browser_crawler_handles: Vec<JoinHandle<_>> = (0..3)
+            .map(|i| {
+                let worker_rx = browser_html_fetcher_rx.clone();
                 tokio::spawn(async move {
                     let mut thread_site_data: Vec<SiteData> = vec![];
                     while let Ok(url) = worker_rx.recv() {
@@ -121,38 +153,29 @@ async fn main() -> Result<()> {
 
         let html_crawler_handles: Vec<JoinHandle<_>> = (0..HTTP_N_WORKERS)
             .map(|i| {
-                let worker_rx = html_crawler_rx.clone();
-                // let worker_browser_tx = browser_crawler_tx.clone();
+                let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+                let worker_rx = page_rx.clone();
+                // let worker_browser_tx = browser_html_fetcher_tx.clone();
                 tokio::spawn(async move {
                     let mut thread_site_data: Vec<SiteData> = vec![];
-                    while let Ok(url) = worker_rx.recv() {
-                        println!("Received job on task {}. Url: {}", i, url);
-                        let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+                    while let Ok(page) = worker_rx.recv() {
+                        println!("Received job on task {}. url: {:#?}", i, &page.base_url);
                         // if let Err(_) = worker_browser_tx.send(url.clone()) {
                         //     eprintln!("Could not send to browser crawler")
                         // }
 
-                        let content = match crawler.get_page_content(&url).await {
-                            Ok(content) => content,
-                            Err(err) => {
-                                eprintln!("Unable to get page content for {}. Err: {}", &url, err);
-                                continue;
-                            }
-                        };
-
-                        let page = Page {
-                            base_url: url.to_owned(),
-                            page_content: content,
-                        };
-
                         match get_site_data_from_page(&crawler, &page).await {
                             Ok(data) => thread_site_data.push(data),
                             Err(err) => match err {
-                                CustomError::NoElementsFound(_) => {
+                                CustomError::NoElementsFound(_)
+                                | CustomError::NoFontUrlsFound(_) => {
                                     println!("SENDER TIL BROWSER");
                                 }
                                 _ => {
-                                    eprintln!("Unable to get site data for {}. Err: {}", &url, err)
+                                    eprintln!(
+                                        "Unable to get site data for {}. Err: {}",
+                                        &page.base_url, err
+                                    )
                                 }
                             },
                         }
@@ -163,14 +186,15 @@ async fn main() -> Result<()> {
             .collect();
 
         for url in urls {
-            if let Err(_) = html_crawler_tx.send(url) {
+            if let Err(_) = http_html_fetcher_tx.send(url) {
                 println!("Could not send to channel");
             }
         }
 
         // drop the transmitter to close the channel
-        drop(html_crawler_tx);
-        drop(browser_crawler_tx);
+        drop(http_html_fetcher_tx);
+        drop(browser_html_fetcher_tx);
+        drop(page_tx);
 
         let mut all_site_data: Vec<SiteData> = vec![];
         for h in html_crawler_handles {
@@ -185,6 +209,11 @@ async fn main() -> Result<()> {
             println!("BROWSER FERDIG: {:?}", r.len());
         }
 
+        for h in http_fetcher_handles {
+            let r = h.await.map_err(|err| eyre!(err))?;
+            println!("HTTP FETCHER FERDIG: {:?}", r);
+        }
+
         println!("Font data for everything");
         println!("Length: {}", all_site_data.len());
         println!("{:#?}", all_site_data);
@@ -193,6 +222,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
 pub struct Page {
     base_url: String,
     page_content: String,
@@ -207,7 +237,7 @@ struct SiteData {
 async fn get_site_data_from_page(crawler: &HttpCrawler, page: &Page) -> Result<SiteData> {
     // Get page content to find links to follow
     // let page_content = crawler.get_page_content(base_url).await?;
-    let font_urls = crawler.get_font_urls_from_page(&page).await?;
+    let font_urls = crawler.get_font_urls_from_page(page).await?;
 
     let mut font_contents: Vec<Vec<u8>> = vec![];
 

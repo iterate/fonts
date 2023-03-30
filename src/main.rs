@@ -23,8 +23,6 @@ use thiserror::Error;
 // Cant find stylesheet for https//www.hjernelaering.no/
 // - but its there... this is a bug
 
-const HTTP_N_WORKERS: i32 = 5;
-
 pub type Result<T, E = CustomError> = std::result::Result<T, E>;
 
 #[derive(Error, Debug)]
@@ -91,23 +89,28 @@ async fn main() -> Result<()> {
             .map(|file| file.split("\n").map(|s| s.to_owned()).collect())
             .expect("could not load file");
 
-        let (page_tx, page_rx) = flume::bounded::<Page>(5);
+        let (page_node_tx, page_node_rx) = flume::bounded::<Page>(5);
+        let (verifier_node_tx, verifier_node_rx) = flume::bounded::<Page>(3);
 
-        let (http_html_fetcher_tx, http_html_fetcher_rx) = flume::bounded::<String>(2);
-        let (browser_html_fetcher_tx, browser_html_fetcher_rx) = flume::bounded::<String>(2);
+        let (http_html_node_tx, http_html_node_rx) = flume::bounded::<String>(3);
+        let (browser_html_node_tx, browser_html_node_rx) = flume::bounded::<String>(3);
 
         let http_html_handles: Vec<JoinHandle<_>> = (0..3)
             .map(|i| {
-                let rx = http_html_fetcher_rx.clone();
                 let crawler: HttpCrawler = HttpCrawler::new().unwrap();
-                let site_data_tx = page_tx.clone();
+
+                let http_html_node_rx = http_html_node_rx.clone();
+                let verifier_node_tx = verifier_node_tx.clone();
 
                 tokio::spawn(async move {
-                    while let Ok(url) = rx.recv() {
+                    while let Ok(url) = http_html_node_rx.recv() {
                         println!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
 
                         let content = match crawler.get_page_content(&url).await {
-                            Ok(content) => content,
+                            Ok(content) => {
+                                println!("got content for url: {}", &url);
+                                content
+                            }
                             Err(err) => {
                                 eprintln!("Unable to get page content for {}. Err: {}", &url, err);
                                 continue;
@@ -119,8 +122,50 @@ async fn main() -> Result<()> {
                             page_content: content,
                         };
 
-                        if let Err(_) = site_data_tx.send(page) {
+                        if let Err(_) = verifier_node_tx.send(page) {
                             eprintln!("Could not send page to site data tx")
+                        }
+                    }
+                    println!("HTTP HTML FETCHER TASK DONE");
+                })
+            })
+            .collect();
+
+        let verifier_handles: Vec<JoinHandle<_>> = (0..3)
+            .map(|i| {
+                let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+
+                let verifier_node_rx = verifier_node_rx.clone();
+                let browser_html_node_tx = browser_html_node_tx.clone();
+                let page_node_tx = page_node_tx.clone();
+
+                tokio::spawn(async move {
+                    while let Ok(page) = verifier_node_rx.recv() {
+                        println!(
+                            "Receiver VERIFIER NODE JOB on task {}. Url: {}",
+                            i, &page.base_url
+                        );
+
+                        match crawler.get_font_urls_from_page(&page).await {
+                            Ok(_) => {
+                                if let Err(_) = page_node_tx.send(page) {
+                                    eprintln!("Could not send page to site data tx")
+                                }
+                            }
+                            Err(err) => match err {
+                                CustomError::NoElementsFound(_)
+                                | CustomError::NoFontUrlsFound(_) => {
+                                    if let Err(_) = browser_html_node_tx.send(page.base_url) {
+                                        eprintln!("Could not send page to browser html node tx")
+                                    }
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "Unable to get site data for {}. Err: {}",
+                                        &page.base_url, err
+                                    )
+                                }
+                            },
                         }
                     }
                 })
@@ -129,12 +174,13 @@ async fn main() -> Result<()> {
 
         let browser_html_handles: Vec<JoinHandle<_>> = (0..3)
             .map(|i| {
-                let rx = browser_html_fetcher_rx.clone();
-                let site_data_tx = page_tx.clone();
                 let crawler: BrowserCrawler = BrowserCrawler::new().unwrap();
 
+                let browser_html_node_rx = browser_html_node_rx.clone();
+                let page_node_tx = page_node_tx.clone();
+
                 tokio::spawn(async move {
-                    while let Ok(url) = rx.recv() {
+                    while let Ok(url) = browser_html_node_rx.recv() {
                         println!("Received BROWSER JOB on task {}. Url: {}", i, url);
 
                         let content = match crawler.get_page_content(&url) {
@@ -150,79 +196,78 @@ async fn main() -> Result<()> {
                             page_content: content,
                         };
 
-                        if let Err(_) = site_data_tx.send(page) {
+                        if let Err(_) = page_node_tx.send(page) {
                             eprintln!("Could not send page to site data tx")
                         }
                     }
+                    println!("BROWSER HTML FETCHER TASK DONE");
                 })
             })
             .collect();
 
-        let html_crawler_handles: Vec<JoinHandle<_>> = (0..HTTP_N_WORKERS)
+        let page_handles: Vec<JoinHandle<_>> = (0..5)
             .map(|i| {
                 let crawler: HttpCrawler = HttpCrawler::new().unwrap();
-                let rx = page_rx.clone();
-                let browser_html_tx = browser_html_fetcher_tx.clone();
-                // let worker_browser_tx = browser_html_fetcher_tx.clone();
+
+                let page_node_rx = page_node_rx.clone();
+
                 tokio::spawn(async move {
                     let mut thread_site_data: Vec<SiteData> = vec![];
-                    while let Ok(page) = rx.recv() {
+                    while let Ok(page) = page_node_rx.recv() {
                         println!("Received job on task {}. url: {:#?}", i, &page.base_url);
 
                         match get_site_data_from_page(&crawler, &page).await {
-                            Ok(data) => thread_site_data.push(data),
-                            Err(err) => match err {
-                                CustomError::NoElementsFound(_)
-                                | CustomError::NoFontUrlsFound(_) => {
-                                    println!("SENDER TIL BROWSER");
-                                    if let Err(_) = browser_html_tx.send(page.base_url.to_owned()) {
-                                        eprintln!(
-                                            "Could not url: {} to browser html channel",
-                                            &page.base_url
-                                        );
-                                    }
-                                }
-                                _ => {
-                                    eprintln!(
-                                        "Unable to get site data for {}. Err: {}",
-                                        &page.base_url, err
-                                    )
-                                }
-                            },
+                            Ok(data) => {
+                                println!("Success! url: {}", &page.base_url);
+                                thread_site_data.push(data)
+                            }
+                            Err(err) => {
+                                eprintln!(
+                                    "Unable to get site data after validation node {}. Err: {}",
+                                    &page.base_url, err
+                                )
+                            }
                         }
                     }
+                    println!("PAGE TASK DONE");
                     thread_site_data
                 })
             })
             .collect();
 
         for url in urls {
-            if let Err(_) = http_html_fetcher_tx.send(url) {
+            if let Err(_) = http_html_node_tx.send(url) {
                 println!("Could not send to channel");
             }
         }
 
-        // drop the transmitter to close the channel
-        drop(http_html_fetcher_tx);
-        drop(browser_html_fetcher_tx);
-        drop(page_tx);
+        // drop the transmitters to close the channel
+        drop(http_html_node_tx);
+        drop(verifier_node_tx);
+        drop(browser_html_node_tx);
+        drop(page_node_tx);
+
+        for h in http_html_handles {
+            h.await.map_err(|err| eyre!(err))?;
+            println!("HTTP HTML FERDIG");
+        }
+
+        for h in verifier_handles {
+            h.await.map_err(|err| eyre!(err))?;
+            println!("VERIFIER FERDIG");
+        }
+
+        for h in browser_html_handles {
+            h.await.map_err(|err| eyre!(err))?;
+            println!("BROWSER HTML FERDIG");
+        }
 
         let mut all_site_data: Vec<SiteData> = vec![];
-        for h in html_crawler_handles {
+        for h in page_handles {
             let r = h.await.map_err(|err| eyre!(err))?;
             println!("heihei ferdig: {:?}", r.len());
 
             all_site_data.extend(r);
-        }
-
-        for (i, h) in browser_html_handles.into_iter().enumerate() {
-            h.await.map_err(|err| eyre!(err))?;
-            println!("BROWSER HTML FERDIG: {:?}", i);
-        }
-
-        for (i, h) in http_html_handles.into_iter().enumerate() {
-            h.await.map_err(|err| eyre!(err))?;
-            println!("HTTP HTML FERDIG: {:?}", i);
         }
 
         println!("Font data for everything");
@@ -233,7 +278,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Page {
     base_url: String,
     page_content: String,
@@ -248,6 +293,9 @@ struct SiteData {
 async fn get_site_data_from_page(crawler: &HttpCrawler, page: &Page) -> Result<SiteData> {
     // Get page content to find links to follow
     // let page_content = crawler.get_page_content(base_url).await?;
+
+    println!("yesyes");
+
     let font_urls = crawler.get_font_urls_from_page(page).await?;
 
     let mut font_contents: Vec<Vec<u8>> = vec![];
@@ -256,14 +304,14 @@ async fn get_site_data_from_page(crawler: &HttpCrawler, page: &Page) -> Result<S
         let font_content = match crawler.get_font_file_as_bytes(font_url.as_str()).await {
             Ok(font_content) => font_content,
             Err(err) => {
-                eprintln!("{}", err);
+                //eprintln!("{}", err);
                 continue;
             }
         };
         font_contents.push(font_content);
     }
 
-    println!("Found {} font urls", font_urls.len());
+    //println!("Found {} font urls", font_urls.len());
 
     let all_font_data: Vec<FontData> = font_contents
         .iter()

@@ -101,6 +101,7 @@ async fn main() -> Result<()> {
 
                 let http_html_node_rx = http_html_node_rx.clone();
                 let verifier_node_tx = verifier_node_tx.clone();
+                // let page_node_tx = page_node_tx.clone();
 
                 tokio::spawn(async move {
                     while let Ok(url) = http_html_node_rx.recv() {
@@ -125,6 +126,10 @@ async fn main() -> Result<()> {
                         if let Err(_) = verifier_node_tx.send(page) {
                             eprintln!("Could not send page to site data tx")
                         }
+
+                        // if let Err(_) = page_node_tx.send(page) {
+                        //     eprintln!("Could not send page to site data tx")
+                        // }
                     }
                     println!("HTTP HTML FETCHER TASK DONE");
                 })
@@ -148,6 +153,7 @@ async fn main() -> Result<()> {
 
                         match crawler.get_font_urls_from_page(&page).await {
                             Ok(_) => {
+                                println!("Verified url {}", page.base_url);
                                 if let Err(_) = page_node_tx.send(page) {
                                     eprintln!("Could not send page to site data tx")
                                 }
@@ -168,6 +174,7 @@ async fn main() -> Result<()> {
                             },
                         }
                     }
+                    println!("VERIFIER TASK DONE");
                 })
             })
             .collect();

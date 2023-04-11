@@ -1,7 +1,6 @@
 use std::{fs, vec};
 
 use eyre::eyre;
-use flume;
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -89,11 +88,11 @@ async fn main() -> Result<()> {
             .map(|file| file.split("\n").map(|s| s.to_owned()).collect())
             .expect("could not load file");
 
-        let (page_node_tx, page_node_rx) = flume::bounded::<Page>(5);
-        let (verifier_node_tx, verifier_node_rx) = flume::bounded::<Page>(3);
+        let (page_node_tx, page_node_rx) = async_channel::bounded::<Page>(5);
+        let (verifier_node_tx, verifier_node_rx) = async_channel::bounded::<Page>(3);
 
-        let (http_html_node_tx, http_html_node_rx) = flume::bounded::<String>(3);
-        let (browser_html_node_tx, browser_html_node_rx) = flume::bounded::<String>(3);
+        let (http_html_node_tx, http_html_node_rx) = async_channel::bounded::<String>(3);
+        let (browser_html_node_tx, browser_html_node_rx) = async_channel::bounded::<String>(3);
 
         let http_html_handles: Vec<JoinHandle<_>> = (0..3)
             .map(|i| {
@@ -104,7 +103,7 @@ async fn main() -> Result<()> {
                 // let page_node_tx = page_node_tx.clone();
 
                 tokio::spawn(async move {
-                    while let Ok(url) = http_html_node_rx.recv() {
+                    while let Ok(url) = http_html_node_rx.recv().await {
                         println!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
 
                         let content = match crawler.get_page_content(&url).await {
@@ -123,7 +122,7 @@ async fn main() -> Result<()> {
                             page_content: content,
                         };
 
-                        if let Err(_) = verifier_node_tx.send(page) {
+                        if let Err(_) = verifier_node_tx.send(page).await {
                             eprintln!("Could not send page to site data tx")
                         }
 
@@ -145,7 +144,7 @@ async fn main() -> Result<()> {
                 let page_node_tx = page_node_tx.clone();
 
                 tokio::spawn(async move {
-                    while let Ok(page) = verifier_node_rx.recv() {
+                    while let Ok(page) = verifier_node_rx.recv().await {
                         println!(
                             "Receiver VERIFIER NODE JOB on task {}. Url: {}",
                             i, &page.base_url
@@ -154,14 +153,14 @@ async fn main() -> Result<()> {
                         match crawler.get_font_urls_from_page(&page).await {
                             Ok(_) => {
                                 println!("Verified url {}", page.base_url);
-                                if let Err(_) = page_node_tx.send(page) {
+                                if let Err(_) = page_node_tx.send(page).await {
                                     eprintln!("Could not send page to site data tx")
                                 }
                             }
                             Err(err) => match err {
                                 CustomError::NoElementsFound(_)
                                 | CustomError::NoFontUrlsFound(_) => {
-                                    if let Err(_) = browser_html_node_tx.send(page.base_url) {
+                                    if let Err(_) = browser_html_node_tx.send(page.base_url).await {
                                         eprintln!("Could not send page to browser html node tx")
                                     }
                                 }
@@ -187,7 +186,7 @@ async fn main() -> Result<()> {
                 let page_node_tx = page_node_tx.clone();
 
                 tokio::spawn(async move {
-                    while let Ok(url) = browser_html_node_rx.recv() {
+                    while let Ok(url) = browser_html_node_rx.recv().await {
                         println!("Received BROWSER JOB on task {}. Url: {}", i, url);
 
                         let content = match crawler.get_page_content(&url) {
@@ -203,7 +202,7 @@ async fn main() -> Result<()> {
                             page_content: content,
                         };
 
-                        if let Err(_) = page_node_tx.send(page) {
+                        if let Err(_) = page_node_tx.send(page).await {
                             eprintln!("Could not send page to site data tx")
                         }
                     }
@@ -220,7 +219,7 @@ async fn main() -> Result<()> {
 
                 tokio::spawn(async move {
                     let mut thread_site_data: Vec<SiteData> = vec![];
-                    while let Ok(page) = page_node_rx.recv() {
+                    while let Ok(page) = page_node_rx.recv().await {
                         println!("Received job on task {}. url: {:#?}", i, &page.base_url);
 
                         match get_site_data_from_page(&crawler, &page).await {
@@ -243,7 +242,7 @@ async fn main() -> Result<()> {
             .collect();
 
         for url in urls {
-            if let Err(_) = http_html_node_tx.send(url) {
+            if let Err(_) = http_html_node_tx.send(url).await {
                 println!("Could not send to channel");
             }
         }

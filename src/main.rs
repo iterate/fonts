@@ -2,6 +2,7 @@ use std::{fs, vec};
 
 use eyre::eyre;
 use tokio::task::JoinHandle;
+use tracing::{info, span, Level};
 use url::Url;
 
 use crate::{
@@ -42,6 +43,8 @@ async fn main() -> Result<()> {
     // println!("family name: {}", &font_data.family_name);
     // println!("sub name: {}", &font_data.sub_family_name);
     // println!("full name: {}", &font_data.full_name);
+
+    tracing_subscriber::fmt::init();
 
     let args: Vec<String> = std::env::args().collect();
 
@@ -96,42 +99,55 @@ async fn main() -> Result<()> {
 
         let http_html_handles: Vec<JoinHandle<_>> = (0..3)
             .map(|i| {
-                let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+                {
+                    let crawler: HttpCrawler = HttpCrawler::new().unwrap();
 
-                let http_html_node_rx = http_html_node_rx.clone();
-                let verifier_node_tx = verifier_node_tx.clone();
-                // let page_node_tx = page_node_tx.clone();
+                    let http_html_node_rx = http_html_node_rx.clone();
+                    let verifier_node_tx = verifier_node_tx.clone();
+                    // let page_node_tx = page_node_tx.clone();
 
-                tokio::spawn(async move {
-                    while let Ok(url) = http_html_node_rx.recv().await {
-                        println!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
+                    let parent_span = span!(Level::INFO, "http_html_worker", i);
 
-                        let content = match crawler.get_page_content(&url).await {
-                            Ok(content) => {
-                                println!("got content for url: {}", &url);
-                                content
+                    tokio::spawn(async move {
+                        let _enter = parent_span.enter();
+                        while let Ok(url) = http_html_node_rx.recv().await {
+                            let child_span = span!(Level::INFO, "url", url);
+
+                            let _enter = child_span.enter();
+
+                            info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
+
+                            let content = match crawler.get_page_content(&url).await {
+                                Ok(content) => {
+                                    info!("got content for url: {}", &url);
+                                    content
+                                }
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Unable to get page content for {}. Err: {}",
+                                        &url,
+                                        err
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            let page = Page {
+                                base_url: url.to_owned(),
+                                page_content: content,
+                            };
+
+                            if let Err(_) = verifier_node_tx.send(page).await {
+                                tracing::error!("Could not send page to site data tx")
                             }
-                            Err(err) => {
-                                eprintln!("Unable to get page content for {}. Err: {}", &url, err);
-                                continue;
-                            }
-                        };
 
-                        let page = Page {
-                            base_url: url.to_owned(),
-                            page_content: content,
-                        };
-
-                        if let Err(_) = verifier_node_tx.send(page).await {
-                            eprintln!("Could not send page to site data tx")
+                            // if let Err(_) = page_node_tx.send(page).await {
+                            //     tracing:error!("Could not send page to site data tx")
+                            // }
                         }
-
-                        // if let Err(_) = page_node_tx.send(page) {
-                        //     eprintln!("Could not send page to site data tx")
-                        // }
-                    }
-                    println!("HTTP HTML FETCHER TASK DONE");
-                })
+                        info!("HTTP HTML FETCHER TASK DONE");
+                    })
+                }
             })
             .collect();
 
@@ -143,37 +159,43 @@ async fn main() -> Result<()> {
                 let browser_html_node_tx = browser_html_node_tx.clone();
                 let page_node_tx = page_node_tx.clone();
 
+                let span = span!(Level::INFO, "verifier_worker", i);
+
                 tokio::spawn(async move {
+                    let _enter = span.enter();
                     while let Ok(page) = verifier_node_rx.recv().await {
-                        println!(
+                        info!(
                             "Receiver VERIFIER NODE JOB on task {}. Url: {}",
                             i, &page.base_url
                         );
 
                         match crawler.get_font_urls_from_page(&page).await {
                             Ok(_) => {
-                                println!("Verified url {}", page.base_url);
+                                info!("Verified url {}", page.base_url);
                                 if let Err(_) = page_node_tx.send(page).await {
-                                    eprintln!("Could not send page to site data tx")
+                                    tracing::error!("Could not send page to site data tx")
                                 }
                             }
                             Err(err) => match err {
                                 CustomError::NoElementsFound(_)
                                 | CustomError::NoFontUrlsFound(_) => {
                                     if let Err(_) = browser_html_node_tx.send(page.base_url).await {
-                                        eprintln!("Could not send page to browser html node tx")
+                                        tracing::error!(
+                                            "Could not send page to browser html node tx"
+                                        )
                                     }
                                 }
                                 _ => {
-                                    eprintln!(
+                                    tracing::error!(
                                         "Unable to get site data for {}. Err: {}",
-                                        &page.base_url, err
+                                        &page.base_url,
+                                        err
                                     )
                                 }
                             },
                         }
                     }
-                    println!("VERIFIER TASK DONE");
+                    info!("VERIFIER TASK DONE");
                 })
             })
             .collect();
@@ -185,14 +207,21 @@ async fn main() -> Result<()> {
                 let browser_html_node_rx = browser_html_node_rx.clone();
                 let page_node_tx = page_node_tx.clone();
 
+                let span = span!(Level::INFO, "browser_html_worker", i);
+
                 tokio::spawn(async move {
+                    let _enter = span.enter();
                     while let Ok(url) = browser_html_node_rx.recv().await {
-                        println!("Received BROWSER JOB on task {}. Url: {}", i, url);
+                        info!("Received BROWSER JOB on task {}. Url: {}", i, url);
 
                         let content = match crawler.get_page_content(&url) {
                             Ok(content) => content,
                             Err(err) => {
-                                eprintln!("Unable to get page content for {}. Err: {}", &url, err);
+                                tracing::error!(
+                                    "Unable to get page content for {}. Err: {}",
+                                    &url,
+                                    err
+                                );
                                 continue;
                             }
                         };
@@ -203,10 +232,10 @@ async fn main() -> Result<()> {
                         };
 
                         if let Err(_) = page_node_tx.send(page).await {
-                            eprintln!("Could not send page to site data tx")
+                            tracing::error!("Could not send page to site data tx")
                         }
                     }
-                    println!("BROWSER HTML FETCHER TASK DONE");
+                    info!("BROWSER HTML FETCHER TASK DONE");
                 })
             })
             .collect();
@@ -217,25 +246,29 @@ async fn main() -> Result<()> {
 
                 let page_node_rx = page_node_rx.clone();
 
+                let span = span!(Level::INFO, "page_worker", i);
+
                 tokio::spawn(async move {
+                    let _enter = span.enter();
                     let mut thread_site_data: Vec<SiteData> = vec![];
                     while let Ok(page) = page_node_rx.recv().await {
-                        println!("Received job on task {}. url: {:#?}", i, &page.base_url);
+                        info!("Received job on task {}. url: {:#?}", i, &page.base_url);
 
                         match get_site_data_from_page(&crawler, &page).await {
                             Ok(data) => {
-                                println!("Success! url: {}", &page.base_url);
+                                info!("Success! url: {}", &page.base_url);
                                 thread_site_data.push(data)
                             }
                             Err(err) => {
-                                eprintln!(
+                                tracing::error!(
                                     "Unable to get site data after validation node {}. Err: {}",
-                                    &page.base_url, err
+                                    &page.base_url,
+                                    err
                                 )
                             }
                         }
                     }
-                    println!("PAGE TASK DONE");
+                    info!("PAGE TASK DONE");
                     thread_site_data
                 })
             })
@@ -243,7 +276,7 @@ async fn main() -> Result<()> {
 
         for url in urls {
             if let Err(_) = http_html_node_tx.send(url).await {
-                println!("Could not send to channel");
+                info!("Could not send to channel");
             }
         }
 

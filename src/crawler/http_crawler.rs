@@ -10,7 +10,8 @@ use crate::{
         css_parser::parse_css_doc,
         html_parser::{get_elements_from_page, Element},
     },
-    CustomError, Page,
+    tasks::Page,
+    CustomError,
 };
 
 pub struct HttpCrawler {

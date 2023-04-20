@@ -1,0 +1,45 @@
+use async_channel::Receiver;
+use tokio::task::JoinHandle;
+
+use crate::crawler::http_crawler::HttpCrawler;
+
+use super::{Page, SiteData};
+
+pub fn start_page_tasks(
+    page_node_rx: &Receiver<Page>,
+    no_of_tasks: i32,
+) -> Vec<JoinHandle<Vec<SiteData>>> {
+    (0..no_of_tasks)
+        .map(|i| start_page_task(page_node_rx.clone()))
+        .collect()
+}
+
+fn start_page_task(page_node_rx: Receiver<Page>) -> JoinHandle<Vec<SiteData>> {
+    let crawler: HttpCrawler = HttpCrawler::new().unwrap();
+
+    // let span = span!(Level::INFO, "page_worker", i);
+
+    tokio::spawn(async move {
+        // let _enter = span.enter();
+        let mut thread_site_data: Vec<SiteData> = vec![];
+        while let Ok(page) = page_node_rx.recv().await {
+            // info!("Received job on task {}. url: {:#?}", i, &page.base_url);
+
+            match SiteData::from_page(&crawler, &page).await {
+                Ok(data) => {
+                    // info!("Success! url: {}", &page.base_url);
+                    thread_site_data.push(data)
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Unable to get site data after validation node {}. Err: {}",
+                        &page.base_url,
+                        err
+                    )
+                }
+            }
+        }
+        // info!("PAGE TASK DONE");
+        thread_site_data
+    })
+}

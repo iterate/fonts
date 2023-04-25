@@ -21,6 +21,7 @@ use crate::{
 mod crawler;
 mod font_parser;
 mod tasks;
+mod tracer;
 use thiserror::Error;
 
 // KNOWN ISSUES
@@ -53,7 +54,7 @@ async fn main() -> Result<()> {
     // println!("sub name: {}", &font_data.sub_family_name);
     // println!("full name: {}", &font_data.full_name);
 
-    tracing_subscriber::fmt::init();
+    tracer::init_tracing()?;
 
     let args: Vec<String> = std::env::args().collect();
 
@@ -153,5 +154,6 @@ async fn main() -> Result<()> {
         println!("{:#?}", all_site_data);
     }
 
+    global::shutdown_tracer_provider();
     Ok(())
 }

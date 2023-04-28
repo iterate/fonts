@@ -3,39 +3,37 @@ use tokio::task::JoinHandle;
 
 use crate::crawler::http_crawler::HttpCrawler;
 
-use super::Page;
+use super::{
+    sender::{send_message_to_channel, ChannelMessage},
+    Page,
+};
 
 pub fn start_html_http_tasks(
-    html_http_node_rx: &Receiver<String>,
-    verifier_node_tx: &Sender<Page>,
+    html_http_node_rx: &Receiver<ChannelMessage<String>>,
+    verifier_node_tx: &Sender<ChannelMessage<Page>>,
     no_of_tasks: i32,
 ) -> Vec<JoinHandle<()>> {
     (0..no_of_tasks)
-        .map(|i| start_html_http_task(html_http_node_rx.clone(), verifier_node_tx.clone()))
+        .map(|i| start_html_http_task(html_http_node_rx.clone(), verifier_node_tx.clone(), i))
         .collect()
 }
 
 fn start_html_http_task(
-    html_http_node_rx: Receiver<String>,
-    verifier_node_tx: Sender<Page>,
+    html_http_node_rx: Receiver<ChannelMessage<String>>,
+    verifier_node_tx: Sender<ChannelMessage<Page>>,
+    i: i32,
 ) -> JoinHandle<()> {
     let crawler: HttpCrawler = HttpCrawler::new().unwrap();
-    // let page_node_tx = page_node_tx.clone();
-
-    // let parent_span = span!(Level::INFO, "http_html_worker", i);
 
     tokio::spawn(async move {
-        // let _enter = parent_span.enter();
-        while let Ok(url) = html_http_node_rx.recv().await {
-            // let child_span = span!(Level::INFO, "url", url);
+        while let Ok(message) = html_http_node_rx.recv().await {
+            let url = message.unwrap();
 
-            // let _enter = child_span.enter();
-
-            // info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
+            tracing::info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
 
             let content = match crawler.get_page_content(&url).await {
                 Ok(content) => {
-                    // info!("got content for url: {}", &url);
+                    tracing::info!("got content for url: {}", &url);
                     content
                 }
                 Err(err) => {
@@ -44,16 +42,12 @@ fn start_html_http_task(
                 }
             };
 
-            let page = Page::new(url, content);
+            let page = Page::new(url.clone(), content);
 
-            if let Err(_) = verifier_node_tx.send(page).await {
+            if let Err(_) = send_message_to_channel(&verifier_node_tx, page).await {
                 tracing::error!("Could not send page to site data tx")
             }
-
-            // if let Err(_) = page_node_tx.send(page).await {
-            //     tracing:error!("Could not send page to site data tx")
-            // }
         }
-        // info!("HTTP HTML FETCHER TASK DONE");
+        tracing::info!("HTTP HTML FETCHER TASK DONE");
     })
 }

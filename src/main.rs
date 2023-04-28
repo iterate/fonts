@@ -3,20 +3,18 @@ use std::{fs, vec};
 use crate::{
     crawler::http_crawler::HttpCrawler,
     tasks::{
-        html_browser::start_html_browser_tasks, html_http::start_html_http_tasks,
-        page::start_page_tasks, verifier::start_verifier_tasks, Page, SiteData,
+        html_browser::start_html_browser_tasks,
+        html_http::start_html_http_tasks,
+        page::start_page_tasks,
+        sender::{send_message_to_channel, ChannelMessage},
+        verifier::start_verifier_tasks,
+        Page, SiteData,
     },
 };
 use eyre::eyre;
-use tokio::task::JoinHandle;
-use tracing::{info, span, Level};
+use opentelemetry::global;
+use tracing::{error, info};
 use url::Url;
-
-use crate::{
-    crawler::{browser_crawler::BrowserCrawler, http_crawler::HttpCrawler},
-    font_parser::FontData,
-    tasks::{http_html::start_http_html_tasks, verifier::start_verifier_tasks},
-};
 
 mod crawler;
 mod font_parser;
@@ -99,9 +97,11 @@ async fn main() -> Result<()> {
             .expect("could not load file");
 
         let (page_node_tx, page_node_rx) = async_channel::bounded::<Page>(5);
-        let (verifier_node_tx, verifier_node_rx) = async_channel::bounded::<Page>(3);
+        let (verifier_node_tx, verifier_node_rx) =
+            async_channel::bounded::<ChannelMessage<Page>>(3);
 
-        let (html_http_node_tx, html_http_node_rx) = async_channel::bounded::<String>(3);
+        let (html_http_node_tx, html_http_node_rx) =
+            async_channel::bounded::<ChannelMessage<String>>(3);
         let (html_browser_node_tx, html_browser_node_rx) = async_channel::bounded::<String>(3);
 
         let html_http_handles = start_html_http_tasks(&html_http_node_rx, &verifier_node_tx, 3);
@@ -115,7 +115,9 @@ async fn main() -> Result<()> {
         let page_handles = start_page_tasks(&page_node_rx, 5);
 
         for url in urls {
-            if let Err(_) = html_http_node_tx.send(url).await {
+            tracing::info!("Starting job");
+
+            if let Err(_) = send_message_to_channel(&html_http_node_tx, url).await {
                 info!("Could not send to channel");
             }
         }

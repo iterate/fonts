@@ -5,9 +5,10 @@ use super::Result;
 pub mod html_browser;
 pub mod html_http;
 pub mod page;
+pub mod sender;
 pub mod verifier;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Page {
     pub base_url: String,
     pub page_content: String,

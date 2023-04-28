@@ -14,6 +14,7 @@ use crate::{
     CustomError,
 };
 
+#[derive(Debug)]
 pub struct HttpCrawler {
     http_client: Client,
 }
@@ -38,7 +39,6 @@ impl HttpCrawler {
             .await
             .map_err(|err| eyre!(err))
     }
-
     pub async fn get_font_urls_from_page(&self, page: &Page) -> crate::Result<Vec<Url>> {
         let elements: Vec<Element> = get_elements_from_page(&page.page_content);
 

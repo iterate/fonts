@@ -10,24 +10,21 @@ pub fn start_page_tasks(
     no_of_tasks: i32,
 ) -> Vec<JoinHandle<Vec<SiteData>>> {
     (0..no_of_tasks)
-        .map(|i| start_page_task(page_node_rx.clone()))
+        .map(|i| start_page_task(page_node_rx.clone(), i))
         .collect()
 }
 
-fn start_page_task(page_node_rx: Receiver<Page>) -> JoinHandle<Vec<SiteData>> {
+fn start_page_task(page_node_rx: Receiver<Page>, i: i32) -> JoinHandle<Vec<SiteData>> {
     let crawler: HttpCrawler = HttpCrawler::new().unwrap();
 
-    // let span = span!(Level::INFO, "page_worker", i);
-
     tokio::spawn(async move {
-        // let _enter = span.enter();
         let mut thread_site_data: Vec<SiteData> = vec![];
         while let Ok(page) = page_node_rx.recv().await {
-            // info!("Received job on task {}. url: {:#?}", i, &page.base_url);
+            tracing::info!("Received job on task {}. url: {:#?}", i, &page.base_url);
 
             match SiteData::from_page(&crawler, &page).await {
                 Ok(data) => {
-                    // info!("Success! url: {}", &page.base_url);
+                    tracing::info!("Success! url: {}", &page.base_url);
                     thread_site_data.push(data)
                 }
                 Err(err) => {
@@ -39,7 +36,7 @@ fn start_page_task(page_node_rx: Receiver<Page>) -> JoinHandle<Vec<SiteData>> {
                 }
             }
         }
-        // info!("PAGE TASK DONE");
+        tracing::info!("PAGE TASK DONE");
         thread_site_data
     })
 }

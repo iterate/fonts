@@ -1,4 +1,5 @@
 use async_channel::{Receiver, Sender};
+use eyre::{Context, Result};
 use tokio::task::JoinHandle;
 
 use crate::{crawler::http_crawler::HttpCrawler, CustomError};
@@ -33,39 +34,57 @@ fn start_verifier_task(
 
     tokio::spawn(async move {
         while let Ok(message) = verifier_node_rx.recv().await {
-            let page = message.unwrap();
-
-            tracing::info!(
-                "Receiver VERIFIER NODE JOB on task {}. Url: {}",
+            let content = message.unwrap();
+            let span_id = message.span_id();
+            if let Err(err) = verify(
+                span_id,
+                content,
                 i,
-                &page.base_url
-            );
-
-            let page = message.unwrap();
-
-            match crawler.get_font_urls_from_page(&page).await {
-                Ok(_) => {
-                    tracing::info!("Verified url {}", page.base_url);
-                    if let Err(_) = page_node_tx.send(page.clone()).await {
-                        tracing::error!("Could not send page to site data tx")
-                    }
-                }
-                Err(err) => match err {
-                    CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
-                        if let Err(_) = browser_html_node_tx.send(page.base_url.to_owned()).await {
-                            tracing::error!("Could not send page to browser html node tx")
-                        }
-                    }
-                    _ => {
-                        tracing::error!(
-                            "Unable to get site data for {}. Err: {}",
-                            &page.base_url,
-                            err
-                        )
-                    }
-                },
+                &crawler,
+                &page_node_tx,
+                &browser_html_node_tx,
+            )
+            .await
+            {
+                tracing::error!(error = ?err, "Failed to verify");
             }
         }
         tracing::info!("VERIFIER TASK DONE");
     })
+}
+
+#[tracing::instrument(skip(_span_id, page, crawler, page_node_tx, browser_html_node_tx))]
+async fn verify(
+    _span_id: Option<tracing::Id>,
+    page: &Page,
+    i: i32,
+    crawler: &HttpCrawler,
+    page_node_tx: &Sender<Page>,
+    browser_html_node_tx: &Sender<String>,
+) -> Result<()> {
+    tracing::info!(
+        "Receiver VERIFIER NODE JOB on task {}. Url: {}",
+        i,
+        &page.base_url
+    );
+
+    match crawler.get_font_urls_from_page(&page).await {
+        Ok(_) => {
+            tracing::info!("Verified url {}", page.base_url);
+            if let Err(err) = page_node_tx.send(page.clone()).await {
+                return Err(err).wrap_err("Could not send page to site data tx");
+            }
+            Ok(())
+        }
+        Err(err) => match err {
+            CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
+                if let Err(_) = browser_html_node_tx.send(page.base_url.to_owned()).await {
+                    Err(err).wrap_err("Could not send page to browser html node tx")
+                } else {
+                    Ok(())
+                }
+            }
+            err => Err(err).wrap_err(format!("Unable to get site data for {}.", &page.base_url)),
+        },
+    }
 }

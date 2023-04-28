@@ -42,7 +42,7 @@ impl SiteData {
             let font_content = match crawler.get_font_file_as_bytes(font_url.as_str()).await {
                 Ok(font_content) => font_content,
                 Err(err) => {
-                    //eprintln!("{}", err);
+                    tracing::error!(error = ?err, "Failed to get font content");
                     continue;
                 }
             };

@@ -117,7 +117,7 @@ async fn main() -> Result<()> {
         for url in urls {
             tracing::info!("Starting job");
 
-            if let Err(_) = send_message_to_channel(&html_http_node_tx, url).await {
+            if let Err(_) = send_message_to_channel(None, &html_http_node_tx, url).await {
                 info!("Could not send to channel");
             }
         }

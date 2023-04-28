@@ -35,16 +35,8 @@ fn start_verifier_task(
     tokio::spawn(async move {
         while let Ok(message) = verifier_node_rx.recv().await {
             let content = message.unwrap();
-            let span_id = message.span_id();
-            if let Err(err) = verify(
-                span_id,
-                content,
-                i,
-                &crawler,
-                &page_node_tx,
-                &browser_html_node_tx,
-            )
-            .await
+            if let Err(err) =
+                verify(content, i, &crawler, &page_node_tx, &browser_html_node_tx).await
             {
                 tracing::error!(error = ?err, "Failed to verify");
             }
@@ -53,9 +45,8 @@ fn start_verifier_task(
     })
 }
 
-#[tracing::instrument(skip(_span_id, page, crawler, page_node_tx, browser_html_node_tx))]
+#[tracing::instrument(skip(page, crawler, page_node_tx, browser_html_node_tx))]
 async fn verify(
-    _span_id: Option<tracing::Id>,
     page: &Page,
     i: i32,
     crawler: &HttpCrawler,

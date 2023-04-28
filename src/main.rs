@@ -3,12 +3,9 @@ use std::{fs, vec};
 use crate::{
     crawler::http_crawler::HttpCrawler,
     tasks::{
-        html_browser::start_html_browser_tasks,
-        html_http::start_html_http_tasks,
-        page::start_page_tasks,
-        sender::{send_message_to_channel, ChannelMessage},
-        verifier::start_verifier_tasks,
-        Page, SiteData,
+        html_browser::start_html_browser_tasks, html_http::start_html_http_tasks,
+        page::start_page_tasks, sender::ChannelMessage, verifier::start_verifier_tasks, Page,
+        SiteData,
     },
 };
 use eyre::eyre;
@@ -117,7 +114,7 @@ async fn main() -> Result<()> {
         for url in urls {
             tracing::info!("Starting job");
 
-            if let Err(_) = send_message_to_channel(None, &html_http_node_tx, url).await {
+            if let Err(_) = html_http_node_tx.send(ChannelMessage::new(url)).await {
                 info!("Could not send to channel");
             }
         }

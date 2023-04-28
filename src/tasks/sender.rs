@@ -1,30 +1,29 @@
+use std::collections::HashMap;
+
 use async_channel::{SendError, Sender};
+use opentelemetry::propagation::Injector;
 
 #[derive(Debug)]
 pub struct ChannelMessage<T> {
-    span_id: Option<tracing::Id>,
+    context: HashMap<String, String>,
     body: T,
 }
 
 impl<T> ChannelMessage<T> {
-    pub fn new(span_id: Option<tracing::Id>, body: T) -> Self {
-        Self { body, span_id }
+    pub fn new(body: T) -> Self {
+        Self {
+            context: Default::default(),
+            body,
+        }
     }
 
     pub fn unwrap(&self) -> &T {
         &self.body
     }
-
-    pub fn span_id(&self) -> Option<tracing::Id> {
-        self.span_id.clone()
-    }
 }
 
-pub async fn send_message_to_channel<T>(
-    span_id: Option<tracing::Id>,
-    channel: &Sender<ChannelMessage<T>>,
-    message: T,
-) -> Result<(), SendError<ChannelMessage<T>>> {
-    let message = ChannelMessage::new(span_id, message);
-    channel.send(message).await
+impl<T> Injector for ChannelMessage<T> {
+    fn set(&mut self, key: &str, value: String) {
+        self.context.insert(key.to_owned(), value);
+    }
 }

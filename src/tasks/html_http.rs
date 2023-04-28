@@ -1,13 +1,13 @@
+use std::{collections::HashMap, default};
+
 use async_channel::{Receiver, Sender};
 use eyre::Context;
+use opentelemetry::propagation::Injector;
 use tokio::task::JoinHandle;
 
 use crate::crawler::http_crawler::HttpCrawler;
 
-use super::{
-    sender::{send_message_to_channel, ChannelMessage},
-    Page,
-};
+use super::{sender::ChannelMessage, Page};
 
 pub fn start_html_http_tasks(
     html_http_node_rx: &Receiver<ChannelMessage<String>>,
@@ -48,6 +48,10 @@ async fn fetch_content(
 ) -> eyre::Result<()> {
     tracing::info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
 
+    let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
+    use opentelemetry::propagation::TextMapPropagator;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+
     let content = match crawler.get_page_content(&url).await {
         Ok(content) => {
             tracing::info!("got content for url: {}", &url);
@@ -60,9 +64,11 @@ async fn fetch_content(
 
     let page = Page::new(url.clone(), content);
 
-    if let Err(err) =
-        send_message_to_channel(tracing::Span::current().id(), verifier_node_tx, page).await
-    {
+    let mut message = ChannelMessage::new(page);
+
+    propagator.inject_context(&tracing::Span::current().context(), &mut message);
+
+    if let Err(err) = verifier_node_tx.send(message).await {
         return Err(err).wrap_err("Could not send page to site data tx");
     }
 

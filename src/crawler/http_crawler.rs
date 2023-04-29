@@ -40,6 +40,8 @@ impl HttpCrawler {
             .await
             .map_err(|err| eyre!(err))
     }
+
+    #[tracing::instrument(skip(self, page), fields(url=page.base_url))]
     pub async fn get_font_urls_from_page(&self, page: &Page) -> crate::Result<Vec<Url>> {
         let elements: Vec<Element> = get_elements_from_page(&page.page_content);
 

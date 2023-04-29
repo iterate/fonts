@@ -12,6 +12,7 @@ impl BrowserCrawler {
         Ok(BrowserCrawler { client })
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn get_page_content(&self, base_url: &str) -> Result<String> {
         let tab = self.client.new_tab().map_err(|err| eyre!(err))?;
 

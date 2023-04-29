@@ -62,7 +62,10 @@ async fn fetch_html_content(
     message.inject(&tracing::Span::current().context());
 
     if let Err(err) = verifier_node_tx.send(message).await {
-        return Err(err).wrap_err("Could not send page to site data tx");
+        return Err(err).wrap_err(format!(
+            "Could not send content to verifier job for url {}",
+            &url
+        ));
     }
 
     Ok(())

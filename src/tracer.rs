@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use opentelemetry::{sdk::Resource, Key, KeyValue};
 use tracing_subscriber::prelude::*;
 
@@ -13,7 +15,9 @@ pub fn init_tracing() -> eyre::Result<()> {
         )
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let fmt_layer = tracing_subscriber::fmt::layer();
+    let fmt_layer = tracing_subscriber::fmt::layer().with_filter(
+        tracing_subscriber::EnvFilter::from_str("info,fonts=debug,headless_chrome=warn").unwrap(),
+    );
     let telemetry_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 
     tracing_subscriber::registry()

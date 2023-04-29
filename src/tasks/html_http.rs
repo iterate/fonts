@@ -1,13 +1,10 @@
-use std::{collections::HashMap, default};
-
 use async_channel::{Receiver, Sender};
 use eyre::Context;
-use opentelemetry::propagation::Injector;
 use tokio::task::JoinHandle;
 
 use crate::crawler::http_crawler::HttpCrawler;
 
-use super::{sender::ChannelMessage, Page};
+use super::{channel_message::ChannelMessage, Page};
 
 pub fn start_html_http_tasks(
     html_http_node_rx: &Receiver<ChannelMessage<String>>,

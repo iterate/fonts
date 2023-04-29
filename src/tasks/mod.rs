@@ -2,10 +2,10 @@ use crate::{crawler::http_crawler::HttpCrawler, font_parser::FontData};
 
 use super::Result;
 
+pub mod channel_message;
 pub mod html_browser;
 pub mod html_http;
 pub mod page;
-pub mod sender;
 pub mod verifier;
 
 #[derive(Debug, Clone)]

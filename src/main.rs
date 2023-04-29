@@ -3,9 +3,9 @@ use std::{fs, vec};
 use crate::{
     crawler::http_crawler::HttpCrawler,
     tasks::{
-        html_browser::start_html_browser_tasks, html_http::start_html_http_tasks,
-        page::start_page_tasks, sender::ChannelMessage, verifier::start_verifier_tasks, Page,
-        SiteData,
+        channel_message::ChannelMessage, html_browser::start_html_browser_tasks,
+        html_http::start_html_http_tasks, page::start_page_tasks, verifier::start_verifier_tasks,
+        Page, SiteData,
     },
 };
 use eyre::eyre;

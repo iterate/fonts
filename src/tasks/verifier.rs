@@ -4,7 +4,7 @@ use tokio::task::JoinHandle;
 
 use crate::{crawler::http_crawler::HttpCrawler, CustomError};
 
-use super::{sender::ChannelMessage, Page};
+use super::{channel_message::ChannelMessage, Page};
 
 pub fn start_verifier_tasks(
     verifier_node_rx: &Receiver<ChannelMessage<Page>>,

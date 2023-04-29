@@ -1,12 +1,14 @@
 use async_channel::{Receiver, Sender};
+use eyre::Context;
 use tokio::task::JoinHandle;
+use tracing::Instrument;
 
 use crate::crawler::browser_crawler::BrowserCrawler;
 
-use super::Page;
+use super::{channel_message::ChannelMessage, Page};
 
 pub fn start_html_browser_tasks(
-    html_browser_node_rx: &Receiver<String>,
+    html_browser_node_rx: &Receiver<ChannelMessage<String>>,
     page_node_tx: &Sender<Page>,
     no_of_tasks: i32,
 ) -> Vec<JoinHandle<()>> {
@@ -16,30 +18,54 @@ pub fn start_html_browser_tasks(
 }
 
 fn start_html_browser_task(
-    html_browser_node_rx: Receiver<String>,
+    html_browser_node_rx: Receiver<ChannelMessage<String>>,
     page_node_tx: Sender<Page>,
     i: i32,
 ) -> JoinHandle<()> {
     let crawler: BrowserCrawler = BrowserCrawler::new().unwrap();
 
     tokio::spawn(async move {
-        while let Ok(url) = html_browser_node_rx.recv().await {
-            tracing::info!("Received BROWSER JOB on task {}. Url: {}", i, url);
+        while let Ok(message) = html_browser_node_rx.recv().await {
+            let span = tracing::info_span!("receive_browser_job");
+            message.link_to_span(&span);
 
-            let content = match crawler.get_page_content(&url) {
-                Ok(content) => content,
-                Err(err) => {
-                    tracing::error!("Unable to get page content for {}. Err: {}", &url, err);
-                    continue;
-                }
-            };
+            let content = message.unwrap();
 
-            let page = Page::new(url, content);
-
-            if let Err(_) = page_node_tx.send(page).await {
-                tracing::error!("Could not send page to site data tx")
+            if let Err(err) =
+                fetch_html_content_with_browser(content.to_owned(), i, &crawler, &page_node_tx)
+                    .instrument(span)
+                    .await
+            {
+                tracing::error!(error = ?err, "Failed to fetch content with browser");
             }
         }
         tracing::info!("BROWSER HTML FETCHER TASK DONE");
     })
+}
+
+#[tracing::instrument(skip(crawler, page_node_tx))]
+async fn fetch_html_content_with_browser(
+    url: String,
+    i: i32,
+    crawler: &BrowserCrawler,
+    page_node_tx: &Sender<Page>,
+) -> eyre::Result<()> {
+    tracing::info!("Received BROWSER JOB on task {}. Url: {}", i, url);
+
+    let content = match crawler.get_page_content(&url) {
+        Ok(content) => {
+            tracing::info!("got content for url: {}", &url);
+            content
+        }
+        Err(err) => {
+            return Err(err).wrap_err(format!("Unable to get page content for {}.", &url));
+        }
+    };
+
+    let page = Page::new(url, content);
+
+    if let Err(_) = page_node_tx.send(page).await {
+        tracing::error!("Could not send page to site data tx")
+    }
+    Ok(())
 }

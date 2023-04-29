@@ -99,7 +99,8 @@ async fn main() -> Result<()> {
 
         let (html_http_node_tx, html_http_node_rx) =
             async_channel::bounded::<ChannelMessage<String>>(3);
-        let (html_browser_node_tx, html_browser_node_rx) = async_channel::bounded::<String>(3);
+        let (html_browser_node_tx, html_browser_node_rx) =
+            async_channel::bounded::<ChannelMessage<String>>(3);
 
         let html_http_handles = start_html_http_tasks(&html_http_node_rx, &verifier_node_tx, 3);
 

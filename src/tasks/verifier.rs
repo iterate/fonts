@@ -1,7 +1,8 @@
 use async_channel::{Receiver, Sender};
-use eyre::{Context, Result};
+use eyre::Context;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::{crawler::http_crawler::HttpCrawler, CustomError};
 
@@ -9,7 +10,7 @@ use super::{channel_message::ChannelMessage, Page};
 
 pub fn start_verifier_tasks(
     verifier_node_rx: &Receiver<ChannelMessage<Page>>,
-    browser_html_node_tx: &Sender<String>,
+    browser_html_node_tx: &Sender<ChannelMessage<String>>,
     page_node_tx: &Sender<Page>,
     no_of_tasks: i32,
 ) -> Vec<JoinHandle<()>> {
@@ -27,7 +28,7 @@ pub fn start_verifier_tasks(
 
 fn start_verifier_task(
     verifier_node_rx: Receiver<ChannelMessage<Page>>,
-    browser_html_node_tx: Sender<String>,
+    browser_html_node_tx: Sender<ChannelMessage<String>>,
     page_node_tx: Sender<Page>,
     i: i32,
 ) -> JoinHandle<()> {
@@ -35,10 +36,10 @@ fn start_verifier_task(
 
     tokio::spawn(async move {
         while let Ok(message) = verifier_node_rx.recv().await {
-            let content = message.unwrap();
             let span = tracing::info_span!("receive_verifier_job");
             message.link_to_span(&span);
 
+            let content = message.unwrap();
             if let Err(err) = verify(content, i, &crawler, &page_node_tx, &browser_html_node_tx)
                 .instrument(span)
                 .await
@@ -56,17 +57,17 @@ async fn verify(
     i: i32,
     crawler: &HttpCrawler,
     page_node_tx: &Sender<Page>,
-    browser_html_node_tx: &Sender<String>,
-) -> Result<()> {
+    browser_html_node_tx: &Sender<ChannelMessage<String>>,
+) -> eyre::Result<()> {
     tracing::info!(
-        "Receiver VERIFIER NODE JOB on task {}. Url: {}",
+        "Received VERIFIER NODE JOB on task {}. Url: {}",
         i,
         &page.base_url
     );
 
     match crawler.get_font_urls_from_page(&page).await {
         Ok(_) => {
-            tracing::info!("Verified url {}", page.base_url);
+            tracing::info!("Verified url {}. Sending to page task.", page.base_url);
             if let Err(err) = page_node_tx.send(page.clone()).await {
                 return Err(err).wrap_err("Could not send page to site data tx");
             }
@@ -74,8 +75,19 @@ async fn verify(
         }
         Err(err) => match err {
             CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
-                if let Err(_) = browser_html_node_tx.send(page.base_url.to_owned()).await {
-                    Err(err).wrap_err("Could not send page to browser html node tx")
+                tracing::info!(
+                    "Could not verify url {}. Sending to browser task.",
+                    page.base_url
+                );
+
+                let mut message = ChannelMessage::new(page.base_url.to_owned());
+                message.inject(&tracing::Span::current().context());
+
+                if let Err(err) = browser_html_node_tx.send(message).await {
+                    Err(err).wrap_err(format!(
+                        "Could not send page to browser html node tx for url: {}",
+                        &page.base_url
+                    ))
                 } else {
                     Ok(())
                 }

@@ -28,7 +28,7 @@ fn start_html_http_task(
         while let Ok(message) = html_http_node_rx.recv().await {
             let content = message.unwrap();
             if let Err(err) =
-                fetch_html_content(content.to_owned(), i, &crawler, &verifier_node_tx).await
+                html_http_job(content.to_owned(), i, &crawler, &verifier_node_tx).await
             {
                 tracing::error!(error = ?err, "Failed to fetch content");
             }
@@ -38,7 +38,7 @@ fn start_html_http_task(
 }
 
 #[tracing::instrument(skip(crawler, verifier_node_tx))]
-async fn fetch_html_content(
+async fn html_http_job(
     url: String,
     i: i32,
     crawler: &HttpCrawler,

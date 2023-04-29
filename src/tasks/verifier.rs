@@ -11,7 +11,7 @@ use super::{channel_message::ChannelMessage, Page};
 pub fn start_verifier_tasks(
     verifier_node_rx: &Receiver<ChannelMessage<Page>>,
     browser_html_node_tx: &Sender<ChannelMessage<String>>,
-    page_node_tx: &Sender<Page>,
+    page_node_tx: &Sender<ChannelMessage<Page>>,
     no_of_tasks: i32,
 ) -> Vec<JoinHandle<()>> {
     (0..no_of_tasks)
@@ -29,14 +29,14 @@ pub fn start_verifier_tasks(
 fn start_verifier_task(
     verifier_node_rx: Receiver<ChannelMessage<Page>>,
     browser_html_node_tx: Sender<ChannelMessage<String>>,
-    page_node_tx: Sender<Page>,
+    page_node_tx: Sender<ChannelMessage<Page>>,
     i: i32,
 ) -> JoinHandle<()> {
     let crawler: HttpCrawler = HttpCrawler::new().unwrap();
 
     tokio::spawn(async move {
         while let Ok(message) = verifier_node_rx.recv().await {
-            let span = tracing::info_span!("receive_verifier_job");
+            let span = tracing::info_span!("verifier_job");
             message.link_to_span(&span);
 
             let content = message.unwrap();
@@ -56,7 +56,7 @@ async fn verify(
     page: &Page,
     i: i32,
     crawler: &HttpCrawler,
-    page_node_tx: &Sender<Page>,
+    page_node_tx: &Sender<ChannelMessage<Page>>,
     browser_html_node_tx: &Sender<ChannelMessage<String>>,
 ) -> eyre::Result<()> {
     tracing::info!(
@@ -68,7 +68,11 @@ async fn verify(
     match crawler.get_font_urls_from_page(&page).await {
         Ok(_) => {
             tracing::info!("Verified url {}. Sending to page task.", page.base_url);
-            if let Err(err) = page_node_tx.send(page.clone()).await {
+
+            let mut message = ChannelMessage::new(page.clone());
+            message.inject(&tracing::Span::current().context());
+
+            if let Err(err) = page_node_tx.send(message).await {
                 return Err(err).wrap_err("Could not send page to site data tx");
             }
             Ok(())

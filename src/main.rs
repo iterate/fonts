@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
             .map(|file| file.split("\n").map(|s| s.to_owned()).collect())
             .expect("could not load file");
 
-        let (page_node_tx, page_node_rx) = async_channel::bounded::<Page>(5);
+        let (page_node_tx, page_node_rx) = async_channel::bounded::<ChannelMessage<Page>>(5);
         let (verifier_node_tx, verifier_node_rx) =
             async_channel::bounded::<ChannelMessage<Page>>(3);
 

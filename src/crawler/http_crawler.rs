@@ -29,6 +29,7 @@ impl HttpCrawler {
         Ok(HttpCrawler { http_client })
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn get_page_content(&self, base_url: &str) -> Result<String> {
         self.http_client
             .get(base_url)

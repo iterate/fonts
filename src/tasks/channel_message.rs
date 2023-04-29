@@ -24,10 +24,19 @@ impl<T> ChannelMessage<T> {
         &self.body
     }
 
-    pub fn link_to_span(&self, span: tracing::Span) {
-        let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
-        let cx = propagator.extract(self);
+    pub fn link_to_span(&self, span: &tracing::Span) {
+        let cx = self.extract();
         span.add_link(cx.span().span_context().clone());
+    }
+
+    pub fn inject(&mut self, cx: &opentelemetry::Context) {
+        let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
+        propagator.inject_context(cx, self);
+    }
+
+    pub fn extract(&self) -> opentelemetry::Context {
+        let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
+        propagator.extract(self)
     }
 }
 

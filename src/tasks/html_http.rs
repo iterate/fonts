@@ -1,6 +1,7 @@
 use async_channel::{Receiver, Sender};
 use eyre::Context;
 use tokio::task::JoinHandle;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::crawler::http_crawler::HttpCrawler;
 
@@ -27,7 +28,7 @@ fn start_html_http_task(
         while let Ok(message) = html_http_node_rx.recv().await {
             let content = message.unwrap();
             if let Err(err) =
-                fetch_content(content.to_owned(), i, &crawler, &verifier_node_tx).await
+                fetch_html_content(content.to_owned(), i, &crawler, &verifier_node_tx).await
             {
                 tracing::error!(error = ?err, "Failed to fetch content");
             }
@@ -37,17 +38,13 @@ fn start_html_http_task(
 }
 
 #[tracing::instrument(skip(crawler, verifier_node_tx))]
-async fn fetch_content(
+async fn fetch_html_content(
     url: String,
     i: i32,
     crawler: &HttpCrawler,
     verifier_node_tx: &Sender<ChannelMessage<Page>>,
 ) -> eyre::Result<()> {
     tracing::info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
-
-    let propagator = opentelemetry::sdk::propagation::TraceContextPropagator::new();
-    use opentelemetry::propagation::TextMapPropagator;
-    use tracing_opentelemetry::OpenTelemetrySpanExt;
 
     let content = match crawler.get_page_content(&url).await {
         Ok(content) => {
@@ -62,8 +59,7 @@ async fn fetch_content(
     let page = Page::new(url.clone(), content);
 
     let mut message = ChannelMessage::new(page);
-
-    propagator.inject_context(&tracing::Span::current().context(), &mut message);
+    message.inject(&tracing::Span::current().context());
 
     if let Err(err) = verifier_node_tx.send(message).await {
         return Err(err).wrap_err("Could not send page to site data tx");

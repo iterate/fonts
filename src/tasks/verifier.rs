@@ -1,6 +1,7 @@
 use async_channel::{Receiver, Sender};
 use eyre::{Context, Result};
 use tokio::task::JoinHandle;
+use tracing::Instrument;
 
 use crate::{crawler::http_crawler::HttpCrawler, CustomError};
 
@@ -35,8 +36,12 @@ fn start_verifier_task(
     tokio::spawn(async move {
         while let Ok(message) = verifier_node_rx.recv().await {
             let content = message.unwrap();
-            if let Err(err) =
-                verify(content, i, &crawler, &page_node_tx, &browser_html_node_tx).await
+            let span = tracing::info_span!("receive_verifier_job");
+            message.link_to_span(&span);
+
+            if let Err(err) = verify(content, i, &crawler, &page_node_tx, &browser_html_node_tx)
+                .instrument(span)
+                .await
             {
                 tracing::error!(error = ?err, "Failed to verify");
             }

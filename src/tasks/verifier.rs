@@ -37,12 +37,20 @@ fn start_verifier_task(
     tokio::spawn(async move {
         while let Ok(message) = verifier_node_rx.recv().await {
             let span = tracing::info_span!("verifier_job");
-            message.link_to_span(&span);
+            span.set_parent(message.extract());
 
             let content = message.unwrap();
-            if let Err(err) = verify(content, i, &crawler, &page_node_tx, &browser_html_node_tx)
-                .instrument(span)
-                .await
+            let root_span = message.root_span();
+            if let Err(err) = verify(
+                content,
+                i,
+                &crawler,
+                &page_node_tx,
+                &browser_html_node_tx,
+                &root_span,
+            )
+            .instrument(span)
+            .await
             {
                 tracing::error!(error = ?err, "Failed to verify");
             }
@@ -51,13 +59,14 @@ fn start_verifier_task(
     })
 }
 
-#[tracing::instrument(skip(page, crawler, page_node_tx, browser_html_node_tx))]
+#[tracing::instrument(skip(page, crawler, page_node_tx, browser_html_node_tx, root_span))]
 async fn verify(
     page: &Page,
     i: i32,
     crawler: &HttpCrawler,
     page_node_tx: &Sender<ChannelMessage<Page>>,
     browser_html_node_tx: &Sender<ChannelMessage<String>>,
+    root_span: &tracing::Span,
 ) -> eyre::Result<()> {
     tracing::info!(
         "Received VERIFIER NODE JOB on task {}. Url: {}",
@@ -69,8 +78,8 @@ async fn verify(
         Ok(_) => {
             tracing::info!("Verified url {}. Sending to page task.", page.base_url);
 
-            let mut message = ChannelMessage::new(page.clone());
-            message.inject(&tracing::Span::current().context());
+            let mut message = ChannelMessage::new(root_span.to_owned(), page.clone());
+            message.inject(&root_span.context());
 
             if let Err(err) = page_node_tx.send(message).await {
                 return Err(err).wrap_err("Could not send page to site data tx");
@@ -84,8 +93,9 @@ async fn verify(
                     page.base_url
                 );
 
-                let mut message = ChannelMessage::new(page.base_url.to_owned());
-                message.inject(&tracing::Span::current().context());
+                let mut message =
+                    ChannelMessage::new(root_span.to_owned(), page.base_url.to_owned());
+                message.inject(&root_span.context());
 
                 if let Err(err) = browser_html_node_tx.send(message).await {
                     Err(err).wrap_err(format!(

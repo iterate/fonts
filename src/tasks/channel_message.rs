@@ -9,13 +9,15 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 #[derive(Debug)]
 pub struct ChannelMessage<T> {
     context: HashMap<String, String>,
+    root_span: tracing::Span,
     body: T,
 }
 
 impl<T> ChannelMessage<T> {
-    pub fn new(body: T) -> Self {
+    pub fn new(root_span: tracing::Span, body: T) -> Self {
         Self {
             context: Default::default(),
+            root_span,
             body,
         }
     }
@@ -24,9 +26,20 @@ impl<T> ChannelMessage<T> {
         &self.body
     }
 
-    pub fn link_to_span(&self, span: &tracing::Span) {
+    pub fn root_span(&self) -> &tracing::Span {
+        &self.root_span
+    }
+
+    #[allow(unused)]
+    pub fn set_parent(&self, span: &tracing::Span) {
         let cx = self.extract();
-        span.add_link(cx.span().span_context().clone());
+        span.set_parent(cx);
+    }
+
+    #[allow(unused)]
+    pub fn set_link(&self, span: &tracing::Span) {
+        let cx = self.extract();
+        span.add_link(cx.span().span_context().clone())
     }
 
     pub fn inject(&mut self, cx: &opentelemetry::Context) {

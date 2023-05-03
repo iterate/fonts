@@ -26,9 +26,19 @@ fn start_html_http_task(
 
     tokio::spawn(async move {
         while let Ok(message) = html_http_node_rx.recv().await {
+            let span = tracing::info_span!("html_http_job");
+            span.set_parent(message.extract());
+
             let content = message.unwrap();
-            if let Err(err) =
-                html_http_job(content.to_owned(), i, &crawler, &verifier_node_tx).await
+            let root_span = message.root_span();
+            if let Err(err) = html_http_job(
+                content.to_owned(),
+                i,
+                &crawler,
+                &verifier_node_tx,
+                root_span,
+            )
+            .await
             {
                 tracing::error!(error = ?err, "Failed to fetch content");
             }
@@ -37,12 +47,13 @@ fn start_html_http_task(
     })
 }
 
-#[tracing::instrument(skip(crawler, verifier_node_tx))]
+#[tracing::instrument(skip(crawler, verifier_node_tx, root_span))]
 async fn html_http_job(
     url: String,
     i: i32,
     crawler: &HttpCrawler,
     verifier_node_tx: &Sender<ChannelMessage<Page>>,
+    root_span: &tracing::Span,
 ) -> eyre::Result<()> {
     tracing::info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
 
@@ -58,8 +69,8 @@ async fn html_http_job(
 
     let page = Page::new(url.clone(), content);
 
-    let mut message = ChannelMessage::new(page);
-    message.inject(&tracing::Span::current().context());
+    let mut message = ChannelMessage::new(root_span.to_owned(), page);
+    message.inject(&root_span.context());
 
     if let Err(err) = verifier_node_tx.send(message).await {
         return Err(err).wrap_err(format!(

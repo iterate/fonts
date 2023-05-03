@@ -10,7 +10,8 @@ use crate::{
 };
 use eyre::eyre;
 use opentelemetry::global;
-use tracing::{error, info};
+use tracing::{error, Instrument};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
 
 mod crawler;
@@ -112,13 +113,7 @@ async fn main() -> Result<()> {
 
         let page_handles = start_page_tasks(&page_node_rx, 5);
 
-        for url in urls {
-            tracing::info!("Starting job");
-
-            if let Err(_) = html_http_node_tx.send(ChannelMessage::new(url)).await {
-                info!("Could not send to channel");
-            }
-        }
+        start_jobs(urls, &html_http_node_tx).await;
 
         // drop the transmitters to close the channel
         drop(html_http_node_tx);
@@ -156,4 +151,27 @@ async fn main() -> Result<()> {
 
     global::shutdown_tracer_provider();
     Ok(())
+}
+
+async fn start_jobs(
+    urls: Vec<String>,
+    html_http_node_tx: &async_channel::Sender<ChannelMessage<String>>,
+) {
+    for url in urls {
+        start_job(url, html_http_node_tx).await;
+    }
+}
+
+#[tracing::instrument(skip(html_http_node_tx))]
+async fn start_job(url: String, html_http_node_tx: &async_channel::Sender<ChannelMessage<String>>) {
+    tracing::info!("Starting job");
+
+    let span = tracing::Span::current();
+
+    let mut message = ChannelMessage::new(span.to_owned(), url);
+    message.inject(&span.context());
+
+    if let Err(_) = html_http_node_tx.send(message).instrument(span).await {
+        tracing::error!("Could not send to html_http channel");
+    }
 }

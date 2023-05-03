@@ -2,6 +2,7 @@ use async_channel::Receiver;
 use eyre::Context;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::crawler::http_crawler::HttpCrawler;
 
@@ -26,7 +27,7 @@ fn start_page_task(
         let mut thread_site_data: Vec<SiteData> = vec![];
         while let Ok(message) = page_node_rx.recv().await {
             let span = tracing::info_span!("page_job");
-            message.link_to_span(&span);
+            span.set_parent(message.extract());
 
             let content = message.unwrap();
 

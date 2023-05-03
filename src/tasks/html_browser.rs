@@ -28,14 +28,19 @@ fn start_html_browser_task(
     tokio::spawn(async move {
         while let Ok(message) = html_browser_node_rx.recv().await {
             let span = tracing::info_span!("html_browser_job");
-            message.link_to_span(&span);
+            span.set_parent(message.extract());
 
             let content = message.unwrap();
-
-            if let Err(err) =
-                fetch_html_content_with_browser(content.to_owned(), i, &crawler, &page_node_tx)
-                    .instrument(span)
-                    .await
+            let root_span = message.root_span();
+            if let Err(err) = fetch_html_content_with_browser(
+                content.to_owned(),
+                i,
+                &crawler,
+                &page_node_tx,
+                root_span,
+            )
+            .instrument(span)
+            .await
             {
                 tracing::error!(error = ?err, "Failed to fetch content with browser");
             }
@@ -50,6 +55,7 @@ async fn fetch_html_content_with_browser(
     i: i32,
     crawler: &BrowserCrawler,
     page_node_tx: &Sender<ChannelMessage<Page>>,
+    root_span: &tracing::Span,
 ) -> eyre::Result<()> {
     tracing::info!("Received BROWSER JOB on task {}. Url: {}", i, url);
 
@@ -64,7 +70,7 @@ async fn fetch_html_content_with_browser(
     };
 
     let page = Page::new(url, content);
-    let mut message = ChannelMessage::new(page);
+    let mut message = ChannelMessage::new(root_span.to_owned(), page);
     message.inject(&tracing::Span::current().context());
 
     if let Err(_) = page_node_tx.send(message).await {

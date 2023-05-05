@@ -6,6 +6,7 @@ use scraper::{Html, Selector};
 
 static INCLUDE_ELEMENTS: Lazy<HashSet<&str>> = Lazy::new(|| hashset!["script", "style", "link"]);
 
+// TODO: Add for base64 encoded font in url like in uxsignals.com
 #[derive(Debug, PartialEq)]
 pub enum Element {
     CssLink(String),

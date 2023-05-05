@@ -28,15 +28,15 @@ pub fn get_elements_from_page(text: &String) -> Vec<Element> {
 
     // println!("{:#?}", head);
 
+    // Fetch inline css elements
     let text_css_selector = Selector::parse("style").expect("could not parse selector");
-
-    // content is css, so this should be correct
     let text_css: Vec<Element> = document
         .select(&text_css_selector)
         .into_iter()
         .map(|element| Element::InlineCss(element.inner_html()))
         .collect();
 
+    // Fetch the other elements
     let mut elements: Vec<Element> = document
         .tree
         .nodes()

@@ -1,6 +1,7 @@
 use async_channel::{Receiver, Sender};
 use eyre::Context;
 use tokio::task::JoinHandle;
+use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::crawler::http_crawler::HttpCrawler;
@@ -31,13 +32,14 @@ fn start_html_http_task(
 
             let content = message.unwrap();
             let root_span = message.root_span();
-            if let Err(err) = html_http_job(
+            if let Err(err) = fetch_html_content(
                 content.to_owned(),
                 i,
                 &crawler,
                 &verifier_node_tx,
                 root_span,
             )
+            .instrument(span)
             .await
             {
                 tracing::error!(error = ?err, "Failed to perform html http job");
@@ -48,7 +50,7 @@ fn start_html_http_task(
 }
 
 #[tracing::instrument(skip(crawler, verifier_node_tx, root_span))]
-async fn html_http_job(
+async fn fetch_html_content(
     url: String,
     i: i32,
     crawler: &HttpCrawler,

@@ -42,10 +42,10 @@ fn start_html_browser_task(
             .instrument(span)
             .await
             {
-                tracing::error!(error = ?err, "Failed to fetch content with browser");
+                tracing::error!(error = ?err, "Failed to perform html browser job");
             }
         }
-        tracing::info!("BROWSER HTML FETCHER TASK DONE");
+        tracing::info!("browser html task {} done.", i);
     })
 }
 
@@ -57,24 +57,20 @@ async fn fetch_html_content_with_browser(
     page_node_tx: &Sender<ChannelMessage<Page>>,
     root_span: &tracing::Span,
 ) -> eyre::Result<()> {
-    tracing::info!("Received BROWSER JOB on task {}. Url: {}", i, url);
+    tracing::info!("Received job on task {}.", i);
 
-    let content = match crawler.get_page_content(&url) {
-        Ok(content) => {
-            tracing::info!("got content for url: {}", &url);
-            content
-        }
-        Err(err) => {
-            return Err(err).wrap_err(format!("Unable to get page content for {}.", &url));
-        }
-    };
+    let content = crawler
+        .get_page_content(&url)
+        .wrap_err(format!("Unable to get page content for {}.", &url))?;
 
-    let page = Page::new(url, content);
+    tracing::info!("gotten page content for url: {}", &url);
+
+    let page = Page::new(url.clone(), content);
     let mut message = ChannelMessage::new(root_span.to_owned(), page);
     message.inject(&tracing::Span::current().context());
 
-    if let Err(_) = page_node_tx.send(message).await {
-        tracing::error!("Could not send page to site data tx")
-    }
-    Ok(())
+    page_node_tx
+        .send(message)
+        .await
+        .wrap_err(format!("Could not send data to page job for url {}", &url))
 }

@@ -52,10 +52,10 @@ fn start_verifier_task(
             .instrument(span)
             .await
             {
-                tracing::error!(error = ?err, "Failed to verify");
+                tracing::error!(error = ?err, "Failed to perform verify job");
             }
         }
-        tracing::info!("VERIFIER TASK DONE");
+        tracing::info!("verifier task {} done.", i);
     })
 }
 
@@ -68,23 +68,21 @@ async fn verify(
     browser_html_node_tx: &Sender<ChannelMessage<String>>,
     root_span: &tracing::Span,
 ) -> eyre::Result<()> {
-    tracing::info!(
-        "Received VERIFIER NODE JOB on task {}. Url: {}",
-        i,
-        &page.base_url
-    );
+    tracing::info!("Received job on task {}.", i);
 
     match crawler.get_font_urls_from_page(&page).await {
         Ok(_) => {
+            // Ignore the result, and the data to page job to finish the process.
+            // We do this do make sure the event-driven architecture is DAG
             tracing::info!("Verified url {}. Sending to page task.", page.base_url);
 
             let mut message = ChannelMessage::new(root_span.to_owned(), page.clone());
             message.inject(&root_span.context());
 
-            if let Err(err) = page_node_tx.send(message).await {
-                return Err(err).wrap_err("Could not send page to site data tx");
-            }
-            Ok(())
+            page_node_tx.send(message).await.wrap_err(format!(
+                "Could not send data to page job for url {}",
+                &page.base_url
+            ))
         }
         Err(err) => match err {
             CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
@@ -97,14 +95,10 @@ async fn verify(
                     ChannelMessage::new(root_span.to_owned(), page.base_url.to_owned());
                 message.inject(&root_span.context());
 
-                if let Err(err) = browser_html_node_tx.send(message).await {
-                    Err(err).wrap_err(format!(
-                        "Could not send page to browser html node tx for url: {}",
-                        &page.base_url
-                    ))
-                } else {
-                    Ok(())
-                }
+                browser_html_node_tx.send(message).await.wrap_err(format!(
+                    "Could not send data to browser html job for url: {}",
+                    &page.base_url
+                ))
             }
             err => Err(err).wrap_err(format!("Unable to get site data for {}.", &page.base_url)),
         },

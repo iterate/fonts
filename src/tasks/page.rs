@@ -1,5 +1,6 @@
 use async_channel::Receiver;
 use eyre::Context;
+use tap::Tap;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -36,26 +37,23 @@ fn start_page_task(
                     tracing::info!("Pushing site data to list");
                     thread_site_data.push(site_data);
                 }
-                Err(err) => tracing::error!(error = ?err, "Failed to get site data"),
+                Err(err) => tracing::error!(error = ?err, "Failed to perform page job"),
             }
         }
-        tracing::info!("PAGE TASK DONE");
+        tracing::info!("page task {} done", i);
         thread_site_data
     })
 }
 
 #[tracing::instrument(skip(crawler, page), fields(url=page.base_url))]
 async fn get_site_data(page: &Page, i: i32, crawler: &HttpCrawler) -> eyre::Result<SiteData> {
-    tracing::info!("Received job on task {}. url: {:#?}", i, &page.base_url);
+    tracing::info!("Received job on task {}.", i);
 
-    match SiteData::from_page(&crawler, &page).await {
-        Ok(data) => {
-            tracing::info!("Success! url: {}", &page.base_url);
-            Ok(data)
-        }
-        Err(err) => Err(err).wrap_err(format!(
+    SiteData::from_page(&crawler, &page)
+        .await
+        .tap(|_| tracing::info!("Success! url: {}", &page.base_url))
+        .wrap_err(format!(
             "Unable to get site data for url {}.",
             &page.base_url,
-        )),
-    }
+        ))
 }

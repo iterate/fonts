@@ -1,8 +1,9 @@
 use std::time::Duration;
 
-use eyre::{eyre, Result};
+use eyre::{eyre, Context, Result};
 
 use reqwest::{header::ACCEPT, Client};
+use tap::TapFallible;
 use url::{ParseError, Url};
 
 use crate::{
@@ -56,33 +57,44 @@ impl HttpCrawler {
             match element {
                 Element::CssLink(element) => {
                     let css_url = match get_parsed_url(&element, &page.base_url) {
-                        Ok(parsed_url) => parsed_url,
-                        Err(_) => continue,
-                    };
-
-                    let font_urls = match self.get_font_urls_from_css_url(css_url.as_str()).await {
-                        Ok(fonts_urls) => fonts_urls,
-                        Err(_) => {
-                            // TODO: Handle error somehow?
+                        Ok(parsed_url) => {
+                            tracing::info!("Parsed url for css link.");
+                            parsed_url
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to parse url. Continuing in loop.");
                             continue;
                         }
                     };
 
-                    let font_urls = font_urls.iter().filter_map(|url|
-                            // could have used .ok(), but this probably be logged?
-                                match get_parsed_url(&url, &page.base_url) {
-                                Ok(parsed_url) => return Some(parsed_url),
-                                Err(err) => {
-                                    eprintln!("Could not parse url: {}", err);
-                                    return None;
-                                }
-                            });
+                    let font_urls = match self.get_font_urls_from_css_url(css_url.as_str()).await {
+                        Ok(fonts_urls) => {
+                            tracing::info!("Got font urls from css urls.");
+                            fonts_urls
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to get font urls from css url. Continuing in loop.");
+                            continue;
+                        }
+                    };
+
+                    let font_urls = font_urls.iter().filter_map(|url| {
+                        get_parsed_url(&url, &page.base_url)
+                            .tap_err(|err| tracing::error!(error = ?err, "Could not parse url"))
+                            .ok()
+                    });
                     all_font_urls.extend(font_urls)
                 }
                 Element::FontLink(element) => {
                     let font_url = match get_parsed_url(&element, &page.base_url) {
-                        Ok(parsed_url) => parsed_url,
-                        Err(_) => continue,
+                        Ok(parsed_url) => {
+                            tracing::info!("Parsed url for font link.");
+                            parsed_url
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to parse url. Continuing in loop.");
+                            continue;
+                        }
                     };
                     all_font_urls.push(font_url);
                 }
@@ -98,28 +110,22 @@ impl HttpCrawler {
     }
 
     pub async fn get_font_urls_from_css_url(&self, css_url: &str) -> eyre::Result<Vec<String>> {
-        //println!("Visiting {}", css_url);
-        let res = self.http_client.get(css_url).send().await?; //.bytes().await?;
+        let res = self.http_client.get(css_url).send().await?;
 
         if !res.status().is_success() {
-            eprintln!("Got status {} for {}", res.status(), css_url);
-
-            return Err(eyre!("Not able to get response from site"));
+            return Err(eyre!(
+                "Not able to get response from site {}. Returned status: {}",
+                css_url,
+                res.status()
+            ));
         }
 
-        let b = res.bytes().await?;
+        let b = res.bytes().await.wrap_err("Could not get body as bytes")?;
 
         // need to handle that content-encoding is not [gzip, brotli] (defined as features in reqwest)
         // should be enough to check if string text is utf-8 encodable
-        let s = match std::str::from_utf8(&b) {
-            Ok(s) => s,
-            Err(err) => {
-                return Err(eyre!(
-                    "Not able to parse bytes to utf-8 string. Might be encoding issue. Err: {}",
-                    err
-                ))
-            }
-        };
+        let s = std::str::from_utf8(&b)
+            .wrap_err("Not able to parse bytes to utf-8 string. Might be encoding issue.")?;
 
         Ok(parse_css_doc(&mut s.to_owned())?)
     }
@@ -127,15 +133,27 @@ impl HttpCrawler {
     pub async fn get_font_file_as_bytes(&self, font_url: &str) -> eyre::Result<Vec<u8>> {
         //println!("Fetching {}", font_url);
 
-        let res = self.http_client.get(font_url).send().await?;
+        let res = self
+            .http_client
+            .get(font_url)
+            .send()
+            .await
+            .wrap_err("Unable to send response")?;
 
         if !res.status().is_success() {
-            eprintln!("Got status {} for {}", res.status(), font_url);
-
-            return Err(eyre!("Not able to download font {}", font_url));
+            return Err(eyre!(
+                "Not able to download font {}. Returned status: {}",
+                font_url,
+                res.status()
+            ));
         }
 
-        let content: Vec<u8> = res.bytes().await?.into_iter().collect();
+        let content: Vec<u8> = res
+            .bytes()
+            .await
+            .wrap_err("Could not get body as bytes")?
+            .into_iter()
+            .collect();
 
         Ok(content)
     }
@@ -150,9 +168,9 @@ fn get_parsed_url(url: &str, base_url: &str) -> Result<Url> {
             if err == ParseError::RelativeUrlWithoutBase {
                 return Url::parse(base_url)
                     .and_then(|base| base.join(&url))
-                    .map_err(|err| eyre!(err));
+                    .wrap_err(err);
             }
-            return Err(eyre!("Unable to parse font url correctly for {}", url));
+            return Err(err).wrap_err(format!("Unable to parse font url correctly for {}", url));
         }
     };
 

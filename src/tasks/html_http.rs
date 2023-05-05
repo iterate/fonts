@@ -40,10 +40,10 @@ fn start_html_http_task(
             )
             .await
             {
-                tracing::error!(error = ?err, "Failed to fetch content");
+                tracing::error!(error = ?err, "Failed to perform html http job");
             }
         }
-        tracing::info!("HTTP HTML FETCHER TASK DONE");
+        tracing::info!("http html task {} done.", i);
     })
 }
 
@@ -55,29 +55,21 @@ async fn html_http_job(
     verifier_node_tx: &Sender<ChannelMessage<Page>>,
     root_span: &tracing::Span,
 ) -> eyre::Result<()> {
-    tracing::info!("Received HTTP FETCHER JOB on task {}. Url: {}", i, &url);
+    tracing::info!("Received job on task {}.", i);
 
-    let content = match crawler.get_page_content(&url).await {
-        Ok(content) => {
-            tracing::info!("got content for url: {}", &url);
-            content
-        }
-        Err(err) => {
-            return Err(err).wrap_err(format!("Unable to get page content for {}.", &url));
-        }
-    };
+    let content = crawler
+        .get_page_content(&url)
+        .await
+        .wrap_err(format!("Unable to get page content for {}.", &url))?;
+    tracing::info!("gotten page content for url: {}", &url);
 
     let page = Page::new(url.clone(), content);
 
     let mut message = ChannelMessage::new(root_span.to_owned(), page);
     message.inject(&root_span.context());
 
-    if let Err(err) = verifier_node_tx.send(message).await {
-        return Err(err).wrap_err(format!(
-            "Could not send content to verifier job for url {}",
-            &url
-        ));
-    }
-
-    Ok(())
+    verifier_node_tx.send(message).await.wrap_err(format!(
+        "Could not send content to verifier job for url {}",
+        &url
+    ))
 }

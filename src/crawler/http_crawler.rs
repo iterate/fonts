@@ -55,7 +55,7 @@ impl HttpCrawler {
 
         for element in elements {
             match element {
-                Element::CssLink(element) => {
+                Element::LinkToCss(element) => {
                     let css_url = match get_parsed_url(&element, &page.base_url) {
                         Ok(parsed_url) => {
                             tracing::info!("Parsed url for css link.");
@@ -85,7 +85,7 @@ impl HttpCrawler {
                     });
                     all_font_urls.extend(font_urls)
                 }
-                Element::FontLink(element) => {
+                Element::LinkToFont(element) => {
                     let font_url = match get_parsed_url(&element, &page.base_url) {
                         Ok(parsed_url) => {
                             tracing::info!("Parsed url for font link.");

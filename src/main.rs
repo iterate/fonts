@@ -16,6 +16,7 @@ use url::Url;
 
 mod crawler;
 mod font_parser;
+mod parsers;
 mod tasks;
 mod tracer;
 use thiserror::Error;

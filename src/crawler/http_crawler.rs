@@ -3,13 +3,13 @@ use std::time::Duration;
 use eyre::{eyre, Context, Result};
 
 use reqwest::{header::ACCEPT, Client};
-use tap::TapFallible;
-use url::{ParseError, Url};
+use url::Url;
 
 use crate::{
-    crawler::{
+    parsers::{
         css_parser::parse_css_doc,
         html_parser::{get_elements_from_page, Element},
+        url_parser::{parse_to_font_urls, parse_to_url, FontUrl},
     },
     tasks::Page,
     CustomError,
@@ -56,7 +56,7 @@ impl HttpCrawler {
         for element in elements {
             match element {
                 Element::LinkToCss(element) => {
-                    let css_url = match get_parsed_url(&element, &page.base_url) {
+                    let css_url = match parse_to_url(&element, &page.base_url) {
                         Ok(parsed_url) => {
                             tracing::info!("Parsed url for css link.");
                             parsed_url
@@ -89,15 +89,33 @@ impl HttpCrawler {
                         }
                     };
 
-                    let font_urls = font_urls.iter().filter_map(|url| {
-                        get_parsed_url(&url, &page.base_url)
-                            .tap_err(|err| tracing::error!(error = ?err, "Could not parse url"))
-                            .ok()
-                    });
+                    let font_urls = match parse_to_font_urls(font_urls, &page.base_url) {
+                        Ok(font_urls) => {
+                            tracing::info!("Parsed to font urls.");
+                            font_urls
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to parse to font urls. Continuing in loop.");
+                            continue;
+                        }
+                    };
+
+                    // TODO: maybe rewrite entire function to output FontUrl
+                    // But for now. only include font urls that are http scheme
+                    let font_urls: Vec<Url> = font_urls
+                        .iter()
+                        .filter_map(|font_url| {
+                            if let FontUrl::Http(url) = font_url {
+                                return Some(url.to_owned());
+                            };
+                            None
+                        })
+                        .collect();
+
                     all_font_urls.extend(font_urls)
                 }
                 Element::LinkToFont(element) => {
-                    let font_url = match get_parsed_url(&element, &page.base_url) {
+                    let font_url = match parse_to_url(&element, &page.base_url) {
                         Ok(parsed_url) => {
                             tracing::info!("Parsed url for font link.");
                             parsed_url
@@ -121,8 +139,6 @@ impl HttpCrawler {
     }
 
     pub async fn get_content_as_bytes(&self, url: &str) -> eyre::Result<Vec<u8>> {
-        //println!("Fetching {}", font_url);
-
         let res = self
             .http_client
             .get(url)
@@ -147,22 +163,4 @@ impl HttpCrawler {
 
         Ok(content)
     }
-}
-
-fn get_parsed_url(url: &str, base_url: &str) -> Result<Url> {
-    let maybe_not_base = Url::parse(&url);
-
-    let parsed_url = match maybe_not_base {
-        Ok(url) => url,
-        Err(err) => {
-            if err == ParseError::RelativeUrlWithoutBase {
-                return Url::parse(base_url)
-                    .and_then(|base| base.join(&url))
-                    .wrap_err(err);
-            }
-            return Err(err).wrap_err(format!("Unable to parse font url correctly for {}", url));
-        }
-    };
-
-    Ok(parsed_url)
 }

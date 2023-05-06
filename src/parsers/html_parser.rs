@@ -85,7 +85,7 @@ mod tests {
 
     use eyre::Result;
 
-    use crate::crawler::html_parser::{get_elements_from_page, Element};
+    use crate::parsers::html_parser::{get_elements_from_page, Element};
 
     #[test]
     fn get_links_from_html() -> Result<()> {

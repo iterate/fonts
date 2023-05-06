@@ -53,7 +53,7 @@ mod tests {
 
     use eyre::Result;
 
-    use crate::crawler::css_parser::parse_css_doc;
+    use crate::parsers::css_parser::parse_css_doc;
 
     #[test]
     fn get_urls_from_css_file() -> Result<()> {

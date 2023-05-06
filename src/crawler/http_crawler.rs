@@ -62,18 +62,29 @@ impl HttpCrawler {
                             parsed_url
                         }
                         Err(err) => {
-                            tracing::error!(error = ?err, "Failed to parse url. Continuing in loop.");
+                            tracing::error!(error = ?err, "Failed to parse url. Continuing in loop...");
                             continue;
                         }
                     };
 
-                    let font_urls = match self.get_font_urls_from_css_url(css_url.as_str()).await {
+                    let css_content = match self.get_content_as_bytes(css_url.as_str()).await {
+                        Ok(content) => {
+                            tracing::info!("Got css content from url");
+                            content
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to css content from url. Continuing in loop...");
+                            continue;
+                        }
+                    };
+
+                    let font_urls = match parse_css_doc(css_content) {
                         Ok(fonts_urls) => {
                             tracing::info!("Got font urls from css urls.");
                             fonts_urls
                         }
                         Err(err) => {
-                            tracing::error!(error = ?err, "Failed to get font urls from css url. Continuing in loop.");
+                            tracing::error!(error = ?err, "Failed to get font urls from css url. Continuing in loop...");
                             continue;
                         }
                     };
@@ -109,41 +120,20 @@ impl HttpCrawler {
         Ok(all_font_urls)
     }
 
-    pub async fn get_font_urls_from_css_url(&self, css_url: &str) -> eyre::Result<Vec<String>> {
-        let res = self.http_client.get(css_url).send().await?;
-
-        if !res.status().is_success() {
-            return Err(eyre!(
-                "Not able to get response from site {}. Returned status: {}",
-                css_url,
-                res.status()
-            ));
-        }
-
-        let b = res.bytes().await.wrap_err("Could not get body as bytes")?;
-
-        // need to handle that content-encoding is not [gzip, brotli] (defined as features in reqwest)
-        // should be enough to check if string text is utf-8 encodable
-        let s = std::str::from_utf8(&b)
-            .wrap_err("Not able to parse bytes to utf-8 string. Might be encoding issue.")?;
-
-        Ok(parse_css_doc(&mut s.to_owned())?)
-    }
-
-    pub async fn get_font_file_as_bytes(&self, font_url: &str) -> eyre::Result<Vec<u8>> {
+    pub async fn get_content_as_bytes(&self, url: &str) -> eyre::Result<Vec<u8>> {
         //println!("Fetching {}", font_url);
 
         let res = self
             .http_client
-            .get(font_url)
+            .get(url)
             .send()
             .await
             .wrap_err("Unable to send response")?;
 
         if !res.status().is_success() {
             return Err(eyre!(
-                "Not able to download font {}. Returned status: {}",
-                font_url,
+                "Not able to download content {}. Returned status: {}",
+                url,
                 res.status()
             ));
         }
@@ -151,7 +141,7 @@ impl HttpCrawler {
         let content: Vec<u8> = res
             .bytes()
             .await
-            .wrap_err("Could not get body as bytes")?
+            .wrap_err("Could not get content as bytes")?
             .into_iter()
             .collect();
 

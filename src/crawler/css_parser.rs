@@ -1,4 +1,4 @@
-use eyre::{eyre, Result};
+use eyre::{eyre, Context, Result};
 
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -9,7 +9,11 @@ static FONT_FACE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"@font-face\{(?P<data>[\s\S]*?)\}").unwrap());
 static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\((?P<data>[\S]*?)\)").unwrap());
 
-pub fn parse_css_doc(text: &mut String) -> Result<Vec<String>> {
+pub fn parse_css_doc(css_as_bytes: Vec<u8>) -> Result<Vec<String>> {
+    let mut text = std::str::from_utf8(&css_as_bytes)
+        .wrap_err("Not able to parse bytes to utf-8 string. Might be encoding issue.")?
+        .to_owned();
+
     // can use retain since variable s is mutable. just want to remove whitespace
     text.retain(|c| !c.is_whitespace());
 
@@ -53,12 +57,9 @@ mod tests {
 
     #[test]
     fn get_urls_from_css_file() -> Result<()> {
-        let mut css_file =
-            fs::read_to_string("test_files/test_mindjek.css").expect("Could not load css file");
+        let css_file = fs::read("test_files/test_mindjek.css").expect("Could not load css file");
 
-        println!("{}", css_file);
-
-        let urls = parse_css_doc(&mut css_file)?;
+        let urls = parse_css_doc(css_file)?;
 
         let expected_results = vec![
             "fonts/fontawesome-webfont.eot?v=4.4.0",
@@ -71,10 +72,9 @@ mod tests {
 
         assert_eq!(urls, expected_results);
 
-        let mut css_file =
-            fs::read_to_string("test_files/test_nrk.css").expect("Could not load css file");
+        let css_file = fs::read("test_files/test_nrk.css").expect("Could not load css file");
 
-        let urls = parse_css_doc(&mut css_file)?;
+        let urls = parse_css_doc(css_file)?;
 
         let expected_results = vec![
             "https://static.nrk.no/nrk-sans/1.2.1/NRKSans_Variable.woff2",
@@ -103,7 +103,7 @@ mod tests {
 
         let urls: Vec<String> = inline_css_strings
             .iter()
-            .filter_map(|inline_css| parse_css_doc(&mut inline_css.to_owned()).ok())
+            .filter_map(|inline_css| parse_css_doc(inline_css.as_bytes().to_vec()).ok())
             .flatten()
             .collect();
 

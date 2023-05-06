@@ -24,25 +24,3 @@ impl BrowserCrawler {
             .map_err(|err| eyre!(err))
     }
 }
-
-#[cfg(test)]
-mod tests {
-
-    use eyre::Result;
-
-    use crate::crawler::html_parser::{get_elements_from_page, Element};
-
-    use super::BrowserCrawler;
-
-    #[test]
-    #[cfg_attr(not(feature = "network"), ignore)]
-    fn get_elements_with_browser_crawler() -> Result<()> {
-        // This test is mainly used for developing.
-        // But, should probably find (or, create) a stable site that outputs something I could use for this test
-        let browser = BrowserCrawler::new()?;
-
-        let content = browser.get_page_content("https://ense.no")?;
-
-        Ok(())
-    }
-}

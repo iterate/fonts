@@ -42,7 +42,7 @@ impl SiteData {
             let font_content = match crawler.get_font_file_as_bytes(font_url.as_str()).await {
                 Ok(font_content) => font_content,
                 Err(err) => {
-                    tracing::error!(error = ?err, "Failed to get font content");
+                    tracing::error!(error = ?err, "Failed to get font content. Continuing...");
                     continue;
                 }
             };
@@ -55,8 +55,8 @@ impl SiteData {
             .iter()
             .filter_map(|font_content| match FontData::from_bytes(font_content) {
                 Ok(font_content) => Some(font_content),
-                Err(_) => {
-                    //eprintln!("{}", err);
+                Err(err) => {
+                    tracing::error!(error = ?err, "Failed to parse font data. Continuing...");
                     None
                 }
             })

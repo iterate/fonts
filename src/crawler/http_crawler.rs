@@ -55,8 +55,8 @@ impl HttpCrawler {
 
         for element in elements {
             match element {
-                Element::LinkToCss(element) => {
-                    let css_url = match parse_to_url(&element, &page.base_url) {
+                Element::LinkToCss(url) => {
+                    let css_url = match parse_to_url(&url, &page.base_url) {
                         Ok(parsed_url) => {
                             tracing::info!("Parsed url for css link.");
                             parsed_url
@@ -114,8 +114,8 @@ impl HttpCrawler {
 
                     all_font_urls.extend(font_urls)
                 }
-                Element::LinkToFont(element) => {
-                    let font_url = match parse_to_url(&element, &page.base_url) {
+                Element::LinkToFont(url) => {
+                    let font_url = match parse_to_url(&url, &page.base_url) {
                         Ok(parsed_url) => {
                             tracing::info!("Parsed url for font link.");
                             parsed_url
@@ -127,7 +127,45 @@ impl HttpCrawler {
                     };
                     all_font_urls.push(font_url);
                 }
-                _ => {}
+                Element::InlineCss(text_css) => {
+                    let bytes_css = text_css.as_bytes().to_vec();
+
+                    let font_urls = match parse_css_doc(bytes_css) {
+                        Ok(fonts_urls) => {
+                            tracing::info!("Got font urls from css urls.");
+                            fonts_urls
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to get font urls from css url. Continuing in loop...");
+                            continue;
+                        }
+                    };
+
+                    let font_urls = match parse_to_font_urls(font_urls, &page.base_url) {
+                        Ok(font_urls) => {
+                            tracing::info!("Parsed to font urls.");
+                            font_urls
+                        }
+                        Err(err) => {
+                            tracing::error!(error = ?err, "Failed to parse to font urls. Continuing in loop.");
+                            continue;
+                        }
+                    };
+
+                    // TODO: maybe rewrite entire function to output FontUrl
+                    // But for now. only include font urls that are http scheme
+                    let font_urls: Vec<Url> = font_urls
+                        .iter()
+                        .filter_map(|font_url| {
+                            if let FontUrl::Http(url) = font_url {
+                                return Some(url.to_owned());
+                            };
+                            None
+                        })
+                        .collect();
+
+                    all_font_urls.extend(font_urls)
+                }
             }
         }
 

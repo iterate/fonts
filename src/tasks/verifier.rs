@@ -87,7 +87,7 @@ async fn verify(
         Err(err) => match err {
             CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
                 tracing::info!(
-                    "Could not verify url {}. Sending to browser task.",
+                    "Could not verify content for url {}. Sending to browser task.",
                     page.base_url
                 );
 

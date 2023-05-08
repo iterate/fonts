@@ -1,6 +1,6 @@
 use headless_chrome::Browser;
 
-use eyre::{eyre, Result};
+use eyre::{eyre, Context, Result};
 
 pub struct BrowserCrawler {
     client: Browser,
@@ -14,7 +14,11 @@ impl BrowserCrawler {
 
     #[tracing::instrument(skip(self))]
     pub fn get_page_content(&self, base_url: &str) -> Result<String> {
-        let tab = self.client.new_tab().map_err(|err| eyre!(err))?;
+        let tab = self
+            .client
+            .new_tab()
+            .map_err(|err| eyre!(err))
+            .wrap_err("Could not open new tab in browser")?;
 
         // todo: how to ensure all the html is loaded?
         //       maybe just wait x number of seconds
@@ -22,5 +26,6 @@ impl BrowserCrawler {
             .and_then(|tab| tab.wait_until_navigated())
             .and_then(|tab| tab.get_content())
             .map_err(|err| eyre!(err))
+            .wrap_err("Could not fetch content with browser")
     }
 }

@@ -1,14 +1,14 @@
 use std::{fs, vec};
 
 use crate::{
-    crawler::http_crawler::HttpCrawler,
+    crawler::{browser_crawler::BrowserCrawler, http_crawler::HttpCrawler},
     tasks::{
         channel_message::ChannelMessage, html_browser::start_html_browser_tasks,
         html_http::start_html_http_tasks, page::start_page_tasks, verifier::start_verifier_tasks,
         Page, SiteData,
     },
 };
-use eyre::eyre;
+use eyre::{eyre, Context};
 use opentelemetry::global;
 use tracing::{error, Instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -46,11 +46,6 @@ pub enum CustomError {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // let font_data = FontData::from_filepath("test_font_1.woff")?;
-    // println!("family name: {}", &font_data.family_name);
-    // println!("sub name: {}", &font_data.sub_family_name);
-    // println!("full name: {}", &font_data.full_name);
-
     tracer::init_tracing()?;
 
     let args: Vec<String> = std::env::args().collect();
@@ -65,24 +60,22 @@ async fn main() -> Result<()> {
 
         let crawler: HttpCrawler = HttpCrawler::new()?;
 
-        let content = match crawler.get_page_content(&url).await {
-            Ok(content) => content,
-            Err(err) => {
-                panic!("Unable to get page content for {}. Err: {}", &url, err)
-            }
-        };
+        let content = get_content_from_url(&url).await?;
 
-        let page = Page::new(url.to_owned(), content);
+        let page = Page::new(url.to_owned(), content.clone());
 
         let all_font_data = match SiteData::from_page(&crawler, &page).await {
-            Ok(data) => data,
+            Ok(data) => {
+                tracing::info!("Got data!");
+                data
+            }
             Err(err) => match err {
-                CustomError::NoElementsFound(_) => {
-                    println!("hallo");
+                CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
+                    tracing::error!("{}", err);
                     return Ok(());
                 }
                 _ => {
-                    eprintln!("Unable to get site data for {}. Err: {}", &url, err);
+                    tracing::error!("Unable to get site data for {}", &url);
                     return Err(err);
                 }
             },
@@ -175,4 +168,54 @@ async fn start_job(url: String, html_http_node_tx: &async_channel::Sender<Channe
     if let Err(_) = html_http_node_tx.send(message).instrument(span).await {
         tracing::error!("Could not send to html_http channel");
     }
+}
+
+// Fetches with http, verifies, and fetches with browser if necessary
+async fn get_content_from_url(url: &str) -> eyre::Result<String> {
+    let crawler: HttpCrawler = HttpCrawler::new()?;
+
+    let content = match crawler.get_page_content(&url).await {
+        Ok(content) => {
+            tracing::info!("Got content with http!");
+            content
+        }
+        Err(err) => {
+            tracing::error!("{}", err);
+            tracing::info!("Could not get fetch with http. Trying with browser");
+            let browser_crawler: BrowserCrawler = BrowserCrawler::new()?;
+            browser_crawler
+                .get_page_content(&url)
+                .wrap_err(format!("Unable to get page content for {}.", &url))?
+        }
+    };
+
+    let page = Page::new(url.to_owned(), content.clone());
+
+    if let Err(err) = crawler.get_font_urls_from_page(&page).await {
+        match err {
+            CustomError::NoElementsFound(_) | CustomError::NoFontUrlsFound(_) => {
+                tracing::info!(
+                    "Could not verify content for url {}. Sending to browser.",
+                    page.base_url
+                );
+
+                let browser_crawler: BrowserCrawler = BrowserCrawler::new()?;
+                return browser_crawler
+                    .get_page_content(&url)
+                    .wrap_err(format!("Unable to get page content for {}.", &url));
+            }
+            err => {
+                tracing::error!(
+                    "Unable to get site data for {}. Err: {}",
+                    &page.base_url,
+                    err
+                );
+
+                return Err(err)
+                    .wrap_err(format!("Unable to get site data for {}.", &page.base_url));
+            }
+        }
+    }
+
+    return Ok(content);
 }

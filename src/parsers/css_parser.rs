@@ -7,7 +7,7 @@ use regex::Regex;
 // static FONT_FACE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"@font-face \{.*\}").unwrap());
 static FONT_FACE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"@font-face\{(?P<data>[\s\S]*?)\}").unwrap());
-static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"\((?P<data>[\S]*?)\)").unwrap());
+static URL_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"url\((?P<data>[\S]*?)\)").unwrap());
 
 pub fn parse_css_doc(css_as_bytes: Vec<u8>) -> Result<Vec<String>> {
     let mut text = std::str::from_utf8(&css_as_bytes)
@@ -31,12 +31,11 @@ pub fn parse_css_doc(css_as_bytes: Vec<u8>) -> Result<Vec<String>> {
     // Maybe this should be extracted into its own method?
     let urls: Vec<String> = matches
         .iter()
-        .flat_map(|s| s.split("url"))
-        .filter_map(|url| -> Option<String> {
+        .flat_map(|url| {
             URL_RE
-                .captures(url.trim())
-                .and_then(|cap| cap.name("data"))
-                .map(|c| c.as_str().replace(&['\"', '\''], ""))
+                .captures_iter(url.trim())
+                .filter_map(|cap| cap.name("data"))
+                .map(|cap| cap.as_str().replace(&['\"', '\''], ""))
         })
         .collect();
 
@@ -117,6 +116,20 @@ mod tests {
         ];
 
         assert_eq!(urls, expected_results);
+
+        Ok(())
+    }
+
+    #[test]
+    fn check_src_parsing() -> Result<()> {
+        let css_file =
+            fs::read("test_files/test_check_src_parsing.css").expect("Could not load css file");
+
+        let urls = parse_css_doc(css_file)?;
+
+        let expected_result = vec!["data:application/x-font-woff;base64,testest"];
+
+        assert_eq!(urls, expected_result);
 
         Ok(())
     }

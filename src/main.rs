@@ -22,11 +22,6 @@ mod tracer;
 use thiserror::Error;
 
 // KNOWN ISSUES
-// Cant find font data for https://ense.no
-// - bleh. dynamisk lastet inn.
-// - https://kerkour.com/rust-crawler-javascript-single-page-application-headless-browser
-// - https://github.com/skerkour/black-hat-rust/blob/main/ch_05/crawler/src/spiders/quotes.rs#L51
-// - https://webant.online/tutorials/web-scraping-rust-fantoccini/
 // Cant find stylesheet for https//www.hjernelaering.no/
 // - but its there... this is a bug
 

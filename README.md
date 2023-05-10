@@ -20,7 +20,7 @@ Create something where I force myself to learn new things.
 - Pipeline from urls to font metadata
   - Fetch and parse html to find the font files
     - Crawlers
-      - [x] Request to server
+      - [x] "Http" (Request to server)
       - [x] Browser
     - Get css content
       - [x] Links to stylesheet

@@ -25,7 +25,12 @@ Create something where I force myself to learn new things.
     - Get css content
       - [x] Links to stylesheet
       - [x] Inline css
-    - Get fonts defined in font-face attribute in css content
+    - Parse css content
+      - [x] Search and grab content defined in font-face attribute
+      - [ ] Search and grab content defined with import attribute.
+        - [Example](https://lcluc.umd.edu/).
+        - [Link to stylesheet](https://lcluc.umd.edu/sites/all/themes/startupgrowth_lite/fonts/lato-font.css?rioeov)
+    - Get fonts or font urls from css content
       - [x] Fetch urls defined in css
       - [ ] Parse base64 encoded data defined in css
   - Event-driven architecture to get font metadata from multiple urls ([_Why event driven?_](#why_event_driven))
